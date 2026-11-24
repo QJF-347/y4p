@@ -1,0 +1,13 @@
+ALTER TABLE SaleEntity ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'PAID';
+ALTER TABLE SaleEntity ADD COLUMN server_version INTEGER;
+
+CREATE TABLE AppSettingsEntity (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    base_url TEXT NOT NULL,
+    device_token TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    branch_id TEXT NOT NULL,
+    cashier_id TEXT NOT NULL,
+    cashier_name TEXT NOT NULL,
+    last_server_version INTEGER NOT NULL DEFAULT 0
+);

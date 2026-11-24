@@ -1,0 +1,17 @@
+CREATE TABLE SaleItemEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    sale_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price REAL NOT NULL,
+    total_price REAL NOT NULL,
+    FOREIGN KEY (sale_id) REFERENCES SaleEntity(id)
+);
+
+selectBySaleId:
+SELECT * FROM SaleItemEntity WHERE sale_id = ?;
+
+insert:
+INSERT INTO SaleItemEntity(id, sale_id, product_id, product_name, quantity, unit_price, total_price)
+VALUES (?, ?, ?, ?, ?, ?, ?);

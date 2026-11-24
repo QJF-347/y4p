@@ -1,0 +1,45 @@
+CREATE TABLE SaleEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    receipt_number TEXT NOT NULL UNIQUE,
+    subtotal REAL NOT NULL,
+    tax_amount REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    payment_method TEXT NOT NULL,
+    amount_received REAL NOT NULL,
+    change_amount REAL NOT NULL,
+    mpesa_ref TEXT,
+    cashier_name TEXT,
+    created_at TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0,
+    payment_status TEXT NOT NULL DEFAULT 'PAID',
+    server_version INTEGER
+);
+
+selectAll:
+SELECT * FROM SaleEntity ORDER BY created_at DESC;
+
+selectById:
+SELECT * FROM SaleEntity WHERE id = ?;
+
+selectByReceiptNumber:
+SELECT * FROM SaleEntity WHERE receipt_number = ?;
+
+selectByDateRange:
+SELECT * FROM SaleEntity WHERE created_at >= ? AND created_at <= ? ORDER BY created_at DESC;
+
+insert:
+INSERT INTO SaleEntity(id, receipt_number, subtotal, tax_amount, total_amount, payment_method, amount_received, change_amount, mpesa_ref, cashier_name, created_at, synced, payment_status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getLastReceiptNumber:
+SELECT receipt_number FROM SaleEntity ORDER BY created_at DESC LIMIT 1;
+
+selectUnsynced:
+SELECT * FROM SaleEntity WHERE synced = 0;
+
+markSynced:
+UPDATE SaleEntity SET synced = 1, server_version = COALESCE(?, server_version) WHERE id = ?;
+
+/** Server-owned M-Pesa outcome; applied from push results and pulls. */
+updatePayment:
+UPDATE SaleEntity SET payment_status = ?, mpesa_ref = COALESCE(?, mpesa_ref), synced = 1 WHERE id = ?;

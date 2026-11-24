@@ -1,0 +1,25 @@
+CREATE TABLE CategoryEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT,
+    icon TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM CategoryEntity ORDER BY sort_order ASC;
+
+selectById:
+SELECT * FROM CategoryEntity WHERE id = ?;
+
+insert:
+INSERT OR REPLACE INTO CategoryEntity(id, name, color, icon, sort_order)
+VALUES (?, ?, ?, ?, ?);
+
+/** Pull-side upsert; server categories carry no color/icon. */
+upsertByName:
+INSERT OR REPLACE INTO CategoryEntity(id, name, color, icon, sort_order)
+VALUES (?, ?, NULL, NULL, ?);
+
+delete:
+DELETE FROM CategoryEntity WHERE id = ?;

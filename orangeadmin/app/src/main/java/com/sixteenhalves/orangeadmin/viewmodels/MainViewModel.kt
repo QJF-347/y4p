@@ -1,0 +1,169 @@
+package com.sixteenhalves.orangeadmin.viewmodels
+
+import android.content.Context
+import android.os.Build
+import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.compose.material3.SnackbarHostState
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.sixteenhalves.orangeadmin.domain.BiometricPreference
+import com.sixteenhalves.orangeadmin.domain.EventManager
+import com.sixteenhalves.orangeadmin.domain.ApplicationState
+import com.sixteenhalves.orangeadmin.domain.NotificationPreferences
+import com.sixteenhalves.orangeadmin.domain.SessionManager
+import com.sixteenhalves.orangeadmin.domain.ThemePreference
+import com.sixteenhalves.orangeadmin.domain.User
+import com.sixteenhalves.orangeadmin.repository.BiometricRepository
+import com.sixteenhalves.orangeadmin.repository.SettingsPreferencesRepository
+import com.sixteenhalves.orangeadmin.repository.UserRepository
+import com.sixteenhalves.orangeadmin.utils.NotificationHelper
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+
+@HiltViewModel
+class MainViewModel
+    @Inject
+    constructor(
+        private val userRepository: UserRepository,
+        private val biometricRepository: BiometricRepository,
+        private val settingsPreferencesRepository: SettingsPreferencesRepository,
+        private val sessionManager: SessionManager
+    ) : ViewModel() {
+        private val _user = MutableLiveData<User?>()
+        val user = _user as LiveData<User?>
+
+        private val _branchesExist = MutableStateFlow(false)
+        val branchesExist = _branchesExist.asStateFlow()
+
+        private val _mainApplicationState = MutableStateFlow<ApplicationState>(ApplicationState.Idle)
+        val mainApplicationState = _mainApplicationState.asStateFlow()
+
+        val themePreference: StateFlow<ThemePreference> =
+            settingsPreferencesRepository.themePreference.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = ThemePreference.SYSTEM_DEFAULT,
+            )
+
+        val notificationPreferences: StateFlow<NotificationPreferences> =
+            settingsPreferencesRepository.notificationPreferences.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = NotificationPreferences(),
+            )
+
+        val biometricPreference: StateFlow<BiometricPreference> =
+            settingsPreferencesRepository
+                .biometricsPreference
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(5000),
+                    initialValue = BiometricPreference(),
+                )
+
+        val snackbarHostState = SnackbarHostState()
+
+        init {
+            viewModelScope.launch {
+                sessionManager.isSessionValid.collect { isValid ->
+                    if (!isValid) {
+                        _mainApplicationState.value = ApplicationState.Unauthenticated
+                        _user.value = null
+                    }
+                }
+            }
+            
+            _mainApplicationState.value = ApplicationState.Loading
+            viewModelScope.launch {
+                try {
+                    val result = userRepository.getUser()
+                    val user = result.getOrNull()
+                    _user.value = user
+                    
+                    if (user != null) {
+                        _mainApplicationState.value = ApplicationState.Authenticated()
+                    } else {
+                        _mainApplicationState.value = ApplicationState.Unauthenticated
+                    }
+                } catch (e: Exception) {
+                    Log.e("MAIN VIEW MODEL", "Error: ${e.message}")
+                    _mainApplicationState.value = ApplicationState.Unauthenticated // Fallback to auth screen
+                }
+            }
+        }
+
+        fun triggerEvent(message: String) {
+            EventManager.triggerEvent(EventManager.AppEvent.ShowEvent(message))
+        }
+
+        fun isBiometricsAvailable(context: Context): Boolean = biometricRepository.isBiometricAvailable(context)
+
+        fun showBiometricPrompt(
+            activity: FragmentActivity,
+            onSuccess: () -> Unit = {},
+            onFailure: () -> Unit = {},
+        ) {
+            biometricRepository.showBiometricPrompt(
+                activity = activity,
+                onFailure = onFailure,
+                onSuccess = onSuccess,
+            )
+        }
+
+        fun updateTheme(themePreference: ThemePreference) {
+            viewModelScope.launch {
+                settingsPreferencesRepository.updateThemePreference(themePreference)
+            }
+        }
+
+        fun updateNotificationPreferences(lowStockAlerts: Boolean? = null) {
+            viewModelScope.launch {
+                settingsPreferencesRepository.updateNotificationPreference(
+                    lowStockAlerts = lowStockAlerts,
+                )
+            }
+        }
+
+        fun updateBiometricPreference(enabled: Boolean) {
+            viewModelScope.launch {
+                settingsPreferencesRepository.updateBiometricPreference(
+                    enabled = enabled,
+                )
+            }
+        }
+
+        @RequiresApi(Build.VERSION_CODES.R)
+        fun promptEnrollBiometric(context: Context) {
+            biometricRepository.promptEnrollBiometric(context)
+        }
+
+        fun logout() {
+            sessionManager.clearSession()
+            // The flow collection in init will automatically handle updating the state to Unauthenticated
+        }
+        
+        fun setAuthenticated(userId: String? = null) {
+            _mainApplicationState.value = ApplicationState.Authenticated(userId)
+        }
+        
+        fun testNotification(context: Context) {
+            val currentPrefs = notificationPreferences.value
+            NotificationHelper.showLowStockNotification(
+                context = context,
+                itemName = "Navel Oranges",
+                remainingStock = 2,
+                preferences = currentPrefs,
+            )
+        }
+    }

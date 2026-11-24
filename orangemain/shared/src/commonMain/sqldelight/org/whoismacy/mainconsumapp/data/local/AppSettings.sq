@@ -1,0 +1,20 @@
+CREATE TABLE AppSettingsEntity (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    base_url TEXT NOT NULL,
+    device_token TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    branch_id TEXT NOT NULL,
+    cashier_id TEXT NOT NULL,
+    cashier_name TEXT NOT NULL,
+    last_server_version INTEGER NOT NULL DEFAULT 0
+);
+
+select:
+SELECT * FROM AppSettingsEntity WHERE id = 1;
+
+upsert:
+INSERT OR REPLACE INTO AppSettingsEntity(id, base_url, device_token, device_id, branch_id, cashier_id, cashier_name, last_server_version)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+
+updateLastVersion:
+UPDATE AppSettingsEntity SET last_server_version = ? WHERE id = 1;

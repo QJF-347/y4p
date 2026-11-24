@@ -1,0 +1,56 @@
+CREATE TABLE ProductEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    barcode TEXT,
+    price REAL NOT NULL,
+    cost_price REAL,
+    category TEXT NOT NULL DEFAULT 'General',
+    image_url TEXT,
+    stock_quantity INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM ProductEntity WHERE is_active = 1 ORDER BY name ASC;
+
+selectById:
+SELECT * FROM ProductEntity WHERE id = ?;
+
+selectByCategory:
+SELECT * FROM ProductEntity WHERE category = ? AND is_active = 1 ORDER BY name ASC;
+
+selectByBarcode:
+SELECT * FROM ProductEntity WHERE barcode = ?;
+
+searchByName:
+SELECT * FROM ProductEntity WHERE name LIKE ? AND is_active = 1 ORDER BY name ASC;
+
+insert:
+INSERT OR REPLACE INTO ProductEntity(id, name, description, barcode, price, cost_price, category, image_url, stock_quantity, is_active, created_at, updated_at, synced)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateStock:
+UPDATE ProductEntity SET stock_quantity = ?, updated_at = ?, synced = 0 WHERE id = ?;
+
+/** Sale-driven stock change is not an independent edit: the backend applies the
+ *  same decrement when the sale syncs (sync.ts applySale), so pushing the
+ *  post-sale counter back would double-count it. Manual updateStock still queues. */
+decrementStock:
+UPDATE ProductEntity SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ?;
+
+delete:
+UPDATE ProductEntity SET is_active = 0, updated_at = ?, synced = 0 WHERE id = ?;
+
+selectUnsynced:
+SELECT * FROM ProductEntity WHERE synced = 0;
+
+/** Applying a server tombstone must not queue the same delete for push-back. */
+markDeletedFromServer:
+UPDATE ProductEntity SET is_active = 0, synced = 1 WHERE id = ?;
+
+markSynced:
+UPDATE ProductEntity SET synced = 1 WHERE id = ?;
