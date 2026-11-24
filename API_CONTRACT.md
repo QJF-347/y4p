@@ -48,6 +48,7 @@ Devices are provisioned by an admin and get their own long-lived credential.
 | `POST /branches/{branch_id}/devices` | (Admin) `{name}` → `{device_id, device_code (4 chars A–Z0–9), device_token, branch_id}`. `device_code` is embedded in receipt numbers and immutable for the device's lifetime. |
 | `POST /devices/heartbeat` | (Device) `{app_version, outbox_pending}` → `{server_time, config:{...}}` — also validates the token. |
 | `DELETE /devices/{device_id}` | (Admin) revoke. Further device calls → 401 `DEVICE_REVOKED`. |
+| `DELETE /devices/{device_id}/permanent` | (Owner) delete an **already revoked** device row; active → 409 `DEVICE_ACTIVE`. Sales keep the plain-text `device_id`, so history is unaffected. |
 
 Device requests authenticate with `X-Device-Token: <token>`. The server derives `device_id` and
 `branch_id` **from the token** — payloads repeat them only for debugging and MUST match, else 403

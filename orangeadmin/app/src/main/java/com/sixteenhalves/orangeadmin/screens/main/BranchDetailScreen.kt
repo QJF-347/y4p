@@ -102,6 +102,7 @@ fun BranchDetailScreen(
                 onAddDevice = onAddDevice,
                 onAddInventory = onAddInventory,
                 onRevokeDevice = { device -> mainViewModel.revokeDevice(branchId, device.id) },
+                onDeleteDevice = { device -> mainViewModel.deleteDevice(branchId, device.id) },
                 canManage = canManage,
                 modifier = modifier,
             )
@@ -115,6 +116,7 @@ private fun BranchDetailContent(
     onAddDevice: () -> Unit,
     onAddInventory: () -> Unit,
     onRevokeDevice: (DeviceInfo) -> Unit,
+    onDeleteDevice: (DeviceInfo) -> Unit,
     canManage: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -230,6 +232,7 @@ private fun BranchDetailContent(
             devices = devices,
             onAddDevice = onAddDevice,
             onRevokeDevice = onRevokeDevice,
+            onDeleteDevice = onDeleteDevice,
             canManage = canManage,
         )
 
@@ -414,9 +417,11 @@ private fun DevicesSection(
     devices: List<DeviceInfo>,
     onAddDevice: () -> Unit,
     onRevokeDevice: (DeviceInfo) -> Unit,
+    onDeleteDevice: (DeviceInfo) -> Unit,
     canManage: Boolean,
 ) {
     var pendingRevoke by remember { mutableStateOf<DeviceInfo?>(null) }
+    var pendingDelete by remember { mutableStateOf<DeviceInfo?>(null) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -539,6 +544,18 @@ private fun DevicesSection(
                                     )
                                 }
                             }
+                            if (canManage && device.isRevoked) {
+                                TextButton(
+                                    onClick = { pendingDelete = device },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                ) {
+                                    Text(
+                                        text = "Delete",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    )
+                                }
+                            }
                         }
                     }
                     if (index < devices.size - 1) {
@@ -572,6 +589,33 @@ private fun DevicesSection(
             },
             dismissButton = {
                 TextButton(onClick = { pendingRevoke = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    pendingDelete?.let { device ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete device?") },
+            text = {
+                Text(
+                    "\"${device.name.ifBlank { "POS Device" }}\" (${device.code}) will be removed from this branch for good. Past sales stay on record.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        onDeleteDevice(device)
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
                     Text("Cancel")
                 }
             },

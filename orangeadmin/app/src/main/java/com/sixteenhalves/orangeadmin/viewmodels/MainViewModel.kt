@@ -64,6 +64,12 @@ class MainViewModel
         private val _dashboard = MutableStateFlow<UiState<DashboardSummary>>(UiState.Loading)
         val dashboard = _dashboard.asStateFlow()
 
+        private val _isRefreshingDashboard = MutableStateFlow(false)
+        val isRefreshingDashboard = _isRefreshingDashboard.asStateFlow()
+
+        private val _dashboardUpdatedAt = MutableStateFlow<Long?>(null)
+        val dashboardUpdatedAt = _dashboardUpdatedAt.asStateFlow()
+
         private val _branches = MutableStateFlow<UiState<List<BranchOverview>>>(UiState.Loading)
         val branches = _branches.asStateFlow()
 
@@ -145,11 +151,13 @@ class MainViewModel
             refreshInventory()
         }
 
-        fun refreshDashboard() {
+        fun refreshDashboard(showLoading: Boolean = true) {
             dashboardJob?.cancel()
             dashboardJob =
                 viewModelScope.launch {
-                    _dashboard.value = UiState.Loading
+                    if (showLoading) _dashboard.value = UiState.Loading
+                    _isRefreshingDashboard.value = true
+                    try {
                     val summaryResult = adminRepository.getDashboardSummary()
                     val overviewsResult = adminRepository.getBranchOverviews()
 
@@ -168,7 +176,7 @@ class MainViewModel
                             _dashboard.value = UiState.Failed(message)
                             return@launch
                         }
-                        notifyUsingSavedData()
+                        if (showLoading) notifyUsingSavedData()
                     }
 
                     val data =
@@ -188,6 +196,10 @@ class MainViewModel
                         } else {
                             UiState.Ready(data)
                         }
+                    _dashboardUpdatedAt.value = System.currentTimeMillis()
+                    } finally {
+                        _isRefreshingDashboard.value = false
+                    }
                 }
         }
 
@@ -406,6 +418,20 @@ class MainViewModel
                         triggerEvent("Device revoked")
                         openBranch(branchId)
                     }.onFailure { triggerEvent(it.userFacingMessage("Couldn't revoke device")) }
+            }
+        }
+
+        fun deleteDevice(
+            branchId: String,
+            deviceId: String,
+        ) {
+            viewModelScope.launch {
+                adminRepository
+                    .deleteDevice(deviceId)
+                    .onSuccess {
+                        triggerEvent("Device deleted")
+                        openBranch(branchId)
+                    }.onFailure { triggerEvent(it.userFacingMessage("Couldn't delete device")) }
             }
         }
 

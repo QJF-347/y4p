@@ -131,6 +131,11 @@ interface NetworkService {
         @Path("deviceId") deviceId: String,
     ): Response<Unit>
 
+    @DELETE("/api/v1/devices/{deviceId}/permanent")
+    suspend fun deleteDevicePermanently(
+        @Path("deviceId") deviceId: String,
+    ): Response<Unit>
+
     @GET("/api/v1/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummaryDto>
 }

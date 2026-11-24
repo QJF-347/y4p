@@ -3,14 +3,17 @@ package com.sixteenhalves.orangeadmin.screens.main
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.sixteenhalves.orangeadmin.components.shared.QrCodeImage
 import com.sixteenhalves.orangeadmin.components.shared.SharedTextField
 import com.sixteenhalves.orangeadmin.repository.DeviceRegistration
 import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
@@ -111,26 +115,41 @@ fun BranchDeviceScreen(
                 )
             },
             text = {
+                val shareText = device.shareText()
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Use these credentials to provision the POS device. The token is shown only once.",
+                        text = "In the POS app open Device setup and tap Scan QR code, or share this text to the device and use Paste device details. The token is shown only once.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    QrCodeImage(
+                        content = shareText,
+                        modifier =
+                            Modifier
+                                .size(200.dp)
+                                .align(Alignment.CenterHorizontally),
+                    )
                     Text(
-                        text = "Device code: ${device.code}\nProvisioning token: ${device.token}",
+                        text =
+                            "Device code: ${device.code}\n" +
+                                "Device token: ${device.token}\n" +
+                                "Device id: ${device.deviceId}\n" +
+                                "Branch id: ${device.branchId}",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     )
-                    TextButton(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(
-                                ClipData.newPlainText("Device credentials", "${device.code} ${device.token}"),
-                            )
-                            Toast.makeText(context, "Credentials copied", Toast.LENGTH_SHORT).show()
-                        },
-                    ) {
-                        Text("Copy credentials")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Device credentials", shareText))
+                                Toast.makeText(context, "Credentials copied", Toast.LENGTH_SHORT).show()
+                            },
+                        ) {
+                            Text("Copy details")
+                        }
+                        TextButton(onClick = { context.shareDeviceDetails(shareText) }) {
+                            Text("Share")
+                        }
                     }
                 }
             },
@@ -146,4 +165,26 @@ fun BranchDeviceScreen(
             },
         )
     }
+}
+
+private const val BACKEND_URL = "https://y4p.onrender.com"
+
+/**
+ * The block POS setup understands: it is copied to the clipboard, sent through
+ * the share sheet and encoded in the QR code, and parsed by the POS app.
+ */
+internal fun DeviceRegistration.shareText(): String =
+    "Backend URL: $BACKEND_URL\n" +
+        "Device token: $token\n" +
+        "Device id: $deviceId\n" +
+        "Branch id: $branchId"
+
+private fun Context.shareDeviceDetails(text: String) {
+    val send =
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "POS device details")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+    startActivity(Intent.createChooser(send, "Share device details"))
 }

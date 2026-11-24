@@ -22,6 +22,7 @@ import org.whoismacy.mainconsumapp.util.UuidV7
 
 data class CheckoutState(
     val amountReceivedText: String = "",
+    val phoneNumberText: String = "07",
     val selectedPaymentMethod: PaymentMethod = PaymentMethod.CASH,
     val isProcessing: Boolean = false,
     val paymentStatus: String? = null,
@@ -47,14 +48,17 @@ class CheckoutViewModel(
     }
 
     fun onAmountReceivedChanged(value: String) {
-        _state.update { it.copy(amountReceivedText = value) }
+        _state.update { it.copy(amountReceivedText = value, paymentError = null) }
+    }
+
+    fun onPhoneNumberChanged(value: String) {
+        _state.update { it.copy(phoneNumberText = value, paymentError = null) }
     }
 
     fun setPaymentMethod(method: PaymentMethod) {
-        _state.update { it.copy(
-            selectedPaymentMethod = method,
-            amountReceivedText = if (method == PaymentMethod.MPESA) "07" else ""
-        )}
+        // Keep the cash amount and the M-PESA number in separate fields so
+        // switching method never overwrites either.
+        _state.update { it.copy(selectedPaymentMethod = method, paymentError = null) }
     }
 
     /**
@@ -63,7 +67,7 @@ class CheckoutViewModel(
      * API_CONTRACT §5: the gateway, not the till, talks to Daraja.
      */
     fun sendStkPush(totalAmount: Double) {
-        val phoneNumber = _state.value.amountReceivedText
+        val phoneNumber = _state.value.phoneNumberText
         val items = cartRepository.cartItems.value
         if (!isPlausibleKenyanMsisdn(phoneNumber)) {
             _state.update { it.copy(paymentError = "Enter a valid Safaricom number, e.g. 0712345678") }
@@ -138,6 +142,8 @@ class CheckoutViewModel(
                                 paymentStatus = PaymentStatus.PAID,
                                 mpesaRef = receipt,
                                 synced = true,
+                                amountReceived = sale.totalAmount,
+                                changeAmount = 0.0,
                             ),
                             showReceipt = true,
                         ) }
@@ -174,10 +180,18 @@ class CheckoutViewModel(
     }
 
     fun completeCashSale(totalAmount: Double) {
-        val amountReceived = _state.value.amountReceivedText.toDoubleOrNull() ?: totalAmount
+        val amountReceived = _state.value.amountReceivedText.toDoubleOrNull()
+        if (amountReceived == null || amountReceived <= 0.0) {
+            _state.update { it.copy(paymentError = "Enter how much cash the customer gave you") }
+            return
+        }
+        if (amountReceived < totalAmount) {
+            _state.update { it.copy(paymentError = "Cash received is less than the total due") }
+            return
+        }
         val items = cartRepository.cartItems.value
 
-        _state.update { it.copy(isProcessing = true) }
+        _state.update { it.copy(isProcessing = true, paymentError = null) }
 
         viewModelScope.launch {
             val settings = settingsRepository.current()

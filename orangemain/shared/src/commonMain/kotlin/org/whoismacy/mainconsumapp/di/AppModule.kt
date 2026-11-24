@@ -62,7 +62,7 @@ val dataModule = module {
 val viewModelModule = module {
     viewModel { PosViewModel(get(), get()) }
     viewModel { CheckoutViewModel(get(), get(), get(), get(), get()) }
-    viewModel { ProductsViewModel(get(), get()) }
+    viewModel { ProductsViewModel(get(), get(), get()) }
     viewModel { HistoryViewModel(get(), get()) }
     viewModel { SetupViewModel(get(), get()) }
 }

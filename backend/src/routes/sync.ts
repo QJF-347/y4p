@@ -407,8 +407,10 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
           }
         }
         try {
-          // stock_quantity travels with new products; for existing rows the sale
-          // deltas own the column (DATA_CONTRACT §6.4), so we leave it alone.
+          // A newer stock edit must reach the server: the admin dashboard and
+          // other devices only see quantities through this upsert. Same-batch
+          // sales are applied after the product loop, so their deltas still win
+          // over the edited quantity (DATA_CONTRACT §6.4).
           const row = await inSavepoint(q, "prod_upsert", async () => {
             const { rows } = await q.query<{ server_version: string }>(
             `INSERT INTO product (id, branch_id, category_id, name, sku, barcode, price_cents, tax_rate_bp,
@@ -420,6 +422,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
                category_id = EXCLUDED.category_id, name = EXCLUDED.name, sku = EXCLUDED.sku,
                barcode = EXCLUDED.barcode, price_cents = EXCLUDED.price_cents,
                tax_rate_bp = EXCLUDED.tax_rate_bp, cost_price_cents = EXCLUDED.cost_price_cents,
+               stock_quantity = EXCLUDED.stock_quantity,
                image_url = EXCLUDED.image_url, is_active = EXCLUDED.is_active,
                deleted_at = EXCLUDED.deleted_at, updated_at = EXCLUDED.updated_at,
                server_updated_at = now(), server_version = nextval('server_version_seq')

@@ -11,9 +11,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,7 +26,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.domain.BranchOverview
 import com.sixteenhalves.orangeadmin.domain.UiState
 import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     modifier: Modifier = Modifier,
@@ -33,10 +40,21 @@ fun HomeScreen(
 ) {
     val dashboardState by mainViewModel.dashboard.collectAsStateWithLifecycle()
     val branchesState by mainViewModel.branches.collectAsStateWithLifecycle()
+    val isRefreshing by mainViewModel.isRefreshingDashboard.collectAsStateWithLifecycle()
+    val updatedAt by mainViewModel.dashboardUpdatedAt.collectAsStateWithLifecycle()
+
+    // The dashboard is the server's view of today's takings; re-read it every
+    // time the screen is shown instead of relying on the value loaded at login.
+    LaunchedEffect(Unit) { mainViewModel.refreshDashboard(showLoading = false) }
 
     val branchOverviews: List<BranchOverview> =
         (branchesState as? UiState.Ready)?.value.orEmpty()
 
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { mainViewModel.refreshDashboard(showLoading = false) },
+        modifier = modifier.fillMaxSize(),
+    ) {
     when (val current = dashboardState) {
         is UiState.Loading -> {
             Box(
@@ -85,11 +103,25 @@ fun HomeScreen(
         }
 
         is UiState.Ready -> {
-            PopulatedDashboard(
-                summary = current.value,
-                branchOverviews = branchOverviews,
-                modifier = modifier,
-            )
+            Column(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    text =
+                        updatedAt?.let { "Updated ${formatUpdatedTime(it)}" }
+                            ?: "Refreshing…",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                )
+                PopulatedDashboard(
+                    summary = current.value,
+                    branchOverviews = branchOverviews,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
+    }
 }
+
+private fun formatUpdatedTime(epochMillis: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))

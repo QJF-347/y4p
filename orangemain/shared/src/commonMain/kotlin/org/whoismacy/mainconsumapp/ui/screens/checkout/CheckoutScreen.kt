@@ -52,9 +52,12 @@ fun CheckoutScreen(
     val state by viewModel.state.collectAsState()
 
     val amountReceived = state.amountReceivedText.toDoubleOrNull() ?: 0.0
-    val change = if (amountReceived >= totalAmount) amountReceived - totalAmount else 0.0
-    
-    val canComplete = amountReceived >= totalAmount
+    val hasAmount = amountReceived > 0.0
+    val change = (amountReceived - totalAmount).coerceAtLeast(0.0)
+    val shortfall = (totalAmount - amountReceived).coerceAtLeast(0.0)
+
+    val canCompleteCash = hasAmount && amountReceived >= totalAmount
+    val canSendStk = state.phoneNumberText.filter { it.isDigit() }.length >= 9
     
     val mockCartItems = listOf(
         CartItem(
@@ -223,41 +226,8 @@ fun CheckoutScreen(
                         )
                     }
                     
-                    // Quick Cash Amounts
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { viewModel.onAmountReceivedChanged(totalAmount.toInt().toString()) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Exact")
-                        }
-                        OutlinedButton(
-                            onClick = { viewModel.onAmountReceivedChanged("500") },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("500")
-                        }
-                        OutlinedButton(
-                            onClick = { viewModel.onAmountReceivedChanged("1000") },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("1000")
-                        }
-                        OutlinedButton(
-                            onClick = { viewModel.onAmountReceivedChanged("2000") },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("2000")
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
                     NumPad(
-                        onNumberClick = { char -> 
+                        onNumberClick = { char ->
                             if (char == "." && state.amountReceivedText.contains(".")) return@NumPad
                             viewModel.onAmountReceivedChanged(state.amountReceivedText + char)
                         },
@@ -269,14 +239,32 @@ fun CheckoutScreen(
                         },
                         modifier = Modifier.fillMaxWidth(0.8f)
                     )
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text(
-                        text = "Change: ${CurrencyFormatter.format(change)}",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (canComplete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor =
+                                if (canCompleteCash) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (canCompleteCash) "Change" else "Short by",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Text(
+                                text = CurrencyFormatter.format(if (canCompleteCash) change else shortfall),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 } else {
                     // M-PESA Integration
                     Text("Enter Customer Phone Number for STK Push:", style = MaterialTheme.typography.bodyLarge)
@@ -286,26 +274,26 @@ fun CheckoutScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Text(
-                            text = if (state.amountReceivedText.isEmpty()) "07..." else state.amountReceivedText,
+                            text = state.phoneNumberText.ifEmpty { "07..." },
                             style = MaterialTheme.typography.headlineMedium,
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             textAlign = TextAlign.Center
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     if (state.isProcessing) {
                         CircularProgressIndicator(modifier = Modifier.padding(16.dp))
                     } else {
                         NumPad(
-                            onNumberClick = { char -> 
-                                if (char != ".") viewModel.onAmountReceivedChanged(state.amountReceivedText + char)
+                            onNumberClick = { char ->
+                                if (char != ".") viewModel.onPhoneNumberChanged(state.phoneNumberText + char)
                             },
-                            onClearClick = { viewModel.onAmountReceivedChanged("") },
+                            onClearClick = { viewModel.onPhoneNumberChanged("") },
                             onBackspaceClick = {
-                                if (state.amountReceivedText.isNotEmpty()) {
-                                    viewModel.onAmountReceivedChanged(state.amountReceivedText.dropLast(1))
+                                if (state.phoneNumberText.isNotEmpty()) {
+                                    viewModel.onPhoneNumberChanged(state.phoneNumberText.dropLast(1))
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(0.8f)
@@ -334,10 +322,14 @@ fun CheckoutScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = !state.isProcessing && if (state.selectedPaymentMethod == PaymentMethod.CASH) canComplete else state.amountReceivedText.length >= 9
+                    enabled = !state.isProcessing && if (state.selectedPaymentMethod == PaymentMethod.CASH) canCompleteCash else canSendStk
                 ) {
                     Text(
-                        text = if (state.selectedPaymentMethod == PaymentMethod.MPESA) "SEND STK PUSH" else "COMPLETE SALE",
+                        text = when {
+                            state.selectedPaymentMethod == PaymentMethod.MPESA -> "SEND STK PUSH"
+                            !canCompleteCash -> "SHORT BY ${CurrencyFormatter.format(shortfall)}"
+                            else -> "COMPLETE SALE"
+                        },
                         style = MaterialTheme.typography.titleMedium
                     )
                 }

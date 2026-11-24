@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import org.whoismacy.mainconsumapp.data.remote.ApiException
 import org.whoismacy.mainconsumapp.data.repository.SettingsRepository
 import org.whoismacy.mainconsumapp.data.sync.SyncService
+import org.whoismacy.mainconsumapp.util.parseDeviceCredentials
 
 data class SetupState(
     val baseUrl: String = "",
@@ -65,6 +66,44 @@ class SetupViewModel(
     fun onBranchIdChanged(value: String) = _state.update { it.copy(branchId = value) }
 
     fun onCashierNameChanged(value: String) = _state.update { it.copy(cashierName = value) }
+
+    /**
+     * Fills the form from text shared by the admin app (clipboard paste or a
+     * scanned QR code). Fields the text does not mention are left as they are,
+     * and the cashier name is never touched.
+     */
+    fun applyCredentialsText(text: String) {
+        val credentials = parseDeviceCredentials(text)
+        if (credentials == null) {
+            _state.update {
+                it.copy(
+                    error = "That text does not contain device credentials. " +
+                        "Ask the admin to copy or share the device details again.",
+                    message = null,
+                )
+            }
+            return
+        }
+        _state.update {
+            it.copy(
+                baseUrl = credentials.baseUrl ?: it.baseUrl.ifBlank { DEFAULT_BASE_URL },
+                deviceToken = credentials.deviceToken ?: it.deviceToken,
+                deviceId = credentials.deviceId ?: it.deviceId,
+                branchId = credentials.branchId ?: it.branchId,
+                error = null,
+                message = "Device details loaded. Check the cashier name, then tap Save & sync.",
+            )
+        }
+    }
+
+    fun onClipboardEmpty() {
+        _state.update {
+            it.copy(
+                error = "The clipboard is empty. Copy the device details from the admin app first.",
+                message = null,
+            )
+        }
+    }
 
     fun save() {
         val snapshot = _state.value

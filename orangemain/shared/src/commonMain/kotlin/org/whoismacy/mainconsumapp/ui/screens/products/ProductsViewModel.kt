@@ -13,6 +13,7 @@ import org.whoismacy.mainconsumapp.data.model.Category
 import org.whoismacy.mainconsumapp.data.model.Product
 import org.whoismacy.mainconsumapp.data.repository.CategoryRepository
 import org.whoismacy.mainconsumapp.data.repository.ProductRepository
+import org.whoismacy.mainconsumapp.data.sync.SyncService
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -53,6 +54,7 @@ data class ProductsState(
 class ProductsViewModel(
     private val productRepository: ProductRepository,
     private val categoryRepository: CategoryRepository,
+    private val syncService: SyncService,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ProductsState())
     val state: StateFlow<ProductsState> = _state.asStateFlow()
@@ -184,6 +186,9 @@ class ProductsViewModel(
                 stockQuantity = stock,
                 description = s.formDescription.trim(),
                 barcode = s.formBarcode.ifBlank { null },
+                // An edited row always needs pushing; it usually came from a
+                // pull and would otherwise still be marked as synced.
+                synced = false,
             )
         } else {
             Product(
@@ -200,6 +205,7 @@ class ProductsViewModel(
 
         viewModelScope.launch {
             productRepository.insertProduct(product)
+            runCatching { syncService.pushPending() }
             val action = if (s.isEditing) "updated" else "added"
             _state.update {
                 it.copy(
@@ -221,6 +227,7 @@ class ProductsViewModel(
         val product = _state.value.productToDelete ?: return
         viewModelScope.launch {
             productRepository.deleteProduct(product.id)
+            runCatching { syncService.pushPending() }
             _state.update {
                 it.copy(
                     showDeleteConfirmation = false,

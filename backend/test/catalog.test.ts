@@ -125,6 +125,51 @@ test("a branch with an active device cannot be deleted", async () => {
   assert.equal(del.json().error.code, "BRANCH_IN_USE");
 });
 
+test("a revoked device can be permanently deleted, an active one cannot", async () => {
+  const { app, branchId, access } = await setup();
+  const created = await app.inject({
+    method: "POST",
+    url: `/api/v1/branches/${branchId}/devices`,
+    headers: auth(access),
+    payload: { name: "Till 1" },
+  });
+  assert.equal(created.statusCode, 201);
+  const deviceId = created.json().device_id as string;
+
+  const activeDelete = await app.inject({
+    method: "DELETE",
+    url: `/api/v1/devices/${deviceId}/permanent`,
+    headers: auth(access),
+  });
+  assert.equal(activeDelete.statusCode, 409);
+  assert.equal(activeDelete.json().error.code, "DEVICE_ACTIVE");
+
+  const revoke = await app.inject({
+    method: "DELETE",
+    url: `/api/v1/devices/${deviceId}`,
+    headers: auth(access),
+  });
+  assert.equal(revoke.statusCode, 204);
+
+  const deleted = await app.inject({
+    method: "DELETE",
+    url: `/api/v1/devices/${deviceId}/permanent`,
+    headers: auth(access),
+  });
+  assert.equal(deleted.statusCode, 204);
+
+  const { rows } = await pool.query(`SELECT 1 FROM device WHERE id = $1`, [deviceId]);
+  assert.equal(rows.length, 0);
+
+  const again = await app.inject({
+    method: "DELETE",
+    url: `/api/v1/devices/${deviceId}/permanent`,
+    headers: auth(access),
+  });
+  assert.equal(again.statusCode, 404);
+  assert.equal(again.json().error.code, "DEVICE_NOT_FOUND");
+});
+
 test("Idempotency-Key replays the stored response instead of re-running the write", async () => {
   const { app, branchId, access } = await setup();
   const payload = { name: "Mandazi", price_cents: 1000, stock_quantity: 5 };

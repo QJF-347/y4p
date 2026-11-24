@@ -14,6 +14,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -27,6 +28,8 @@ import orangemain.shared.generated.resources.Res
 import orangemain.shared.generated.resources.history
 import orangemain.shared.generated.resources.inventory
 import orangemain.shared.generated.resources.shopping_cart
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.koin.compose.koinInject
 import org.whoismacy.mainconsumapp.data.sync.SyncService
@@ -53,11 +56,17 @@ fun App() {
 
             val showBottomBar = isTopLevelRoute || currentDestination == null
 
-            // Refresh the catalog and any server-owned M-Pesa outcomes on launch.
-            // A no-op if this till has not been provisioned yet.
+            // Keep the till in step with the server: push local edits/sales, then
+            // pull catalog and server-owned M-Pesa outcomes. Runs on launch and
+            // every minute while the app is open. No-ops if not provisioned.
             val syncService: SyncService = koinInject()
+            val syncScope = rememberCoroutineScope()
             LaunchedEffect(Unit) {
-                runCatching { syncService.pull() }
+                while (true) {
+                    runCatching { syncService.pushPending() }
+                    runCatching { syncService.pull() }
+                    delay(60_000)
+                }
             }
 
             Scaffold(
@@ -66,6 +75,16 @@ fun App() {
                         TopAppBar(
                             title = { Text("Orange POS") },
                             actions = {
+                                TextButton(
+                                    onClick = {
+                                        syncScope.launch {
+                                            runCatching { syncService.pushPending() }
+                                            runCatching { syncService.pull() }
+                                        }
+                                    }
+                                ) {
+                                    Text("Sync")
+                                }
                                 TextButton(onClick = { navController.navigate(Route.Setup) { launchSingleTop = true } }) {
                                     Text("Device setup")
                                 }

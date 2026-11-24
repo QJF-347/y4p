@@ -26,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
+import org.whoismacy.mainconsumapp.ui.components.LocalClipboardReader
+import org.whoismacy.mainconsumapp.ui.components.LocalQrScanner
 
 @Composable
 fun SetupScreen(
@@ -33,6 +35,8 @@ fun SetupScreen(
     viewModel: SetupViewModel = koinViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val qrScanner = LocalQrScanner.current
+    val clipboardReader = LocalClipboardReader.current
 
     if (state.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -58,6 +62,33 @@ fun SetupScreen(
                 "branch token and branch id issued by the admin app.",
             style = MaterialTheme.typography.bodyMedium,
         )
+
+        if (qrScanner != null || clipboardReader != null) {
+            Text(
+                text = "Fastest way: scan the QR code the admin app shows, or paste the details it shared.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (clipboardReader != null) {
+                OutlinedButton(
+                    onClick = {
+                        val text = clipboardReader.readText()
+                        if (text.isNullOrBlank()) viewModel.onClipboardEmpty()
+                        else viewModel.applyCredentialsText(text)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Text("Paste device details")
+                }
+            }
+            if (qrScanner != null) {
+                OutlinedButton(
+                    onClick = { qrScanner.scan(viewModel::applyCredentialsText) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Text("Scan QR code")
+                }
+            }
+        }
 
         OutlinedTextField(
             value = state.baseUrl,

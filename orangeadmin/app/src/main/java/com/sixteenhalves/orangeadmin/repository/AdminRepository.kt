@@ -34,6 +34,9 @@ import javax.inject.Singleton
 data class DeviceRegistration(
     val code: String,
     val token: String,
+    /** Server-issued ids the POS device setup screen asks for. */
+    val deviceId: String,
+    val branchId: String,
 )
 
 /** A non-2xx response from the API, carrying the contract error code (API_CONTRACT §0). */
@@ -79,6 +82,9 @@ interface AdminRepository {
     ): Result<DeviceRegistration>
 
     suspend fun revokeDevice(deviceId: String): Result<Unit>
+
+    /** Deletes an already-revoked device row. Sales keep their device_id text. */
+    suspend fun deleteDevice(deviceId: String): Result<Unit>
 
     // Last-known-good snapshots, available while offline.
     fun cachedDashboardSummary(): DashboardSummary?
@@ -360,12 +366,27 @@ class AdminRepositoryImpl
                     DeviceRegistration(
                         code = it.deviceCode.orEmpty(),
                         token = it.deviceToken.orEmpty(),
+                        deviceId = it.deviceId.orEmpty(),
+                        branchId = it.branchId.orEmpty(),
                     )
                 }
 
         override suspend fun revokeDevice(deviceId: String): Result<Unit> =
             try {
                 val response = networkService.revokeDevice(deviceId)
+                if (response.isSuccessful) {
+                    invalidateBranches()
+                    Result.success(Unit)
+                } else {
+                    Result.failure(parseError(response))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+
+        override suspend fun deleteDevice(deviceId: String): Result<Unit> =
+            try {
+                val response = networkService.deleteDevicePermanently(deviceId)
                 if (response.isSuccessful) {
                     invalidateBranches()
                     Result.success(Unit)

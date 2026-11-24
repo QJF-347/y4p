@@ -749,6 +749,35 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: Deps, guards: 
     };
   });
 
+  // Hard delete is only offered for already-revoked devices so a live till can
+  // never lose its credentials by a single mis-click. Sales keep the device_id
+  // as plain text, so historical receipts survive the row going away.
+  app.delete("/devices/:device_id/permanent", async (req, reply) => {
+    const claims = await guards.requireOwner(req);
+    const deviceId = uuid.parse((req.params as { device_id: string }).device_id);
+    const { rows } = await db.query<{ branch_id: string; is_revoked: boolean }>(
+      `SELECT branch_id, is_revoked FROM device WHERE id = $1`,
+      [deviceId],
+    );
+    const device = rows[0];
+    if (!device) throw notFound("DEVICE_NOT_FOUND", "Device does not exist");
+    scopeBranch(claims, device.branch_id);
+    if (!device.is_revoked) {
+      throw conflict("DEVICE_ACTIVE", "Revoke the device before deleting it");
+    }
+    await db.query(`DELETE FROM device WHERE id = $1 AND is_revoked = TRUE`, [deviceId]);
+    await writeAudit(db, {
+      actorType: "USER",
+      actorId: claims.sub,
+      action: "device.delete",
+      entity: "device",
+      entityId: deviceId,
+      details: { branch_id: device.branch_id },
+      ip: req.ip,
+    });
+    reply.status(204).send();
+  });
+
   app.delete("/devices/:device_id", async (req, reply) => {
     const claims = await guards.requireOwner(req);
     const deviceId = uuid.parse((req.params as { device_id: string }).device_id);
