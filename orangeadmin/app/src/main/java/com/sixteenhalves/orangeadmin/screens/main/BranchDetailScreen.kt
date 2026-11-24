@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -27,9 +28,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,6 +101,7 @@ fun BranchDetailScreen(
                 detail = current.value,
                 onAddDevice = onAddDevice,
                 onAddInventory = onAddInventory,
+                onRevokeDevice = { device -> mainViewModel.revokeDevice(branchId, device.id) },
                 canManage = canManage,
                 modifier = modifier,
             )
@@ -108,6 +114,7 @@ private fun BranchDetailContent(
     detail: BranchDetail,
     onAddDevice: () -> Unit,
     onAddInventory: () -> Unit,
+    onRevokeDevice: (DeviceInfo) -> Unit,
     canManage: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -222,6 +229,7 @@ private fun BranchDetailContent(
         DevicesSection(
             devices = devices,
             onAddDevice = onAddDevice,
+            onRevokeDevice = onRevokeDevice,
             canManage = canManage,
         )
 
@@ -405,8 +413,11 @@ private fun InventorySection(
 private fun DevicesSection(
     devices: List<DeviceInfo>,
     onAddDevice: () -> Unit,
+    onRevokeDevice: (DeviceInfo) -> Unit,
     canManage: Boolean,
 ) {
+    var pendingRevoke by remember { mutableStateOf<DeviceInfo?>(null) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -505,16 +516,30 @@ private fun DevicesSection(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(
-                            text = if (device.isRevoked) "Revoked" else "Active",
-                            color =
-                                if (device.isRevoked) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        )
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = if (device.isRevoked) "Revoked" else "Active",
+                                color =
+                                    if (device.isRevoked) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            )
+                            if (canManage && !device.isRevoked) {
+                                TextButton(
+                                    onClick = { pendingRevoke = device },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                ) {
+                                    Text(
+                                        text = "Revoke",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    )
+                                }
+                            }
+                        }
                     }
                     if (index < devices.size - 1) {
                         HorizontalDivider(
@@ -524,6 +549,33 @@ private fun DevicesSection(
                 }
             }
         }
+    }
+
+    pendingRevoke?.let { device ->
+        AlertDialog(
+            onDismissRequest = { pendingRevoke = null },
+            title = { Text("Revoke device?") },
+            text = {
+                Text(
+                    "\"${device.name.ifBlank { "POS Device" }}\" (${device.code}) will stop accepting sales immediately. This cannot be undone from the app.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingRevoke = null
+                        onRevokeDevice(device)
+                    },
+                ) {
+                    Text("Revoke", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRevoke = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

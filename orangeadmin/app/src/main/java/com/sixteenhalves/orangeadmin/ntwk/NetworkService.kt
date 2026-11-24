@@ -126,6 +126,11 @@ interface NetworkService {
         @Body request: CreateDeviceRequest,
     ): Response<CreatedDeviceDto>
 
+    @DELETE("/api/v1/devices/{deviceId}")
+    suspend fun revokeDevice(
+        @Path("deviceId") deviceId: String,
+    ): Response<Unit>
+
     @GET("/api/v1/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummaryDto>
 }

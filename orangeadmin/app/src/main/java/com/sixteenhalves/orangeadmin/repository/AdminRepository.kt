@@ -78,6 +78,8 @@ interface AdminRepository {
         name: String,
     ): Result<DeviceRegistration>
 
+    suspend fun revokeDevice(deviceId: String): Result<Unit>
+
     // Last-known-good snapshots, available while offline.
     fun cachedDashboardSummary(): DashboardSummary?
 
@@ -360,6 +362,19 @@ class AdminRepositoryImpl
                         token = it.deviceToken.orEmpty(),
                     )
                 }
+
+        override suspend fun revokeDevice(deviceId: String): Result<Unit> =
+            try {
+                val response = networkService.revokeDevice(deviceId)
+                if (response.isSuccessful) {
+                    invalidateBranches()
+                    Result.success(Unit)
+                } else {
+                    Result.failure(parseError(response))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
 
         override fun cachedDashboardSummary(): DashboardSummary? = snapshotStore.readDashboard()
 

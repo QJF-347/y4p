@@ -395,6 +395,20 @@ class MainViewModel
             }
         }
 
+        fun revokeDevice(
+            branchId: String,
+            deviceId: String,
+        ) {
+            viewModelScope.launch {
+                adminRepository
+                    .revokeDevice(deviceId)
+                    .onSuccess {
+                        triggerEvent("Device revoked")
+                        openBranch(branchId)
+                    }.onFailure { triggerEvent(it.userFacingMessage("Couldn't revoke device")) }
+            }
+        }
+
         fun isBiometricsAvailable(context: Context): Boolean = biometricRepository.isBiometricAvailable(context)
 
         fun showBiometricPrompt(
