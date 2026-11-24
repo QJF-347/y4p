@@ -1,0 +1,33 @@
+/**
+ * In-process fixed-window limiter. Sufficient for a single-node v1 deployment;
+ * move to Redis when more than one instance serves traffic.
+ */
+export class RateLimiter {
+    now;
+    windows = new Map();
+    constructor(now = Date.now) {
+        this.now = now;
+    }
+    /** Returns true when the call is allowed, false when the limit is exceeded. */
+    hit(key, limit, windowMs) {
+        const t = this.now();
+        const entry = this.windows.get(key);
+        if (!entry || entry.resetAt <= t) {
+            this.windows.set(key, { count: 1, resetAt: t + windowMs });
+            if (this.windows.size > 10_000)
+                this.prune(t);
+            return true;
+        }
+        if (entry.count >= limit)
+            return false;
+        entry.count += 1;
+        return true;
+    }
+    prune(t) {
+        for (const [key, entry] of this.windows) {
+            if (entry.resetAt <= t)
+                this.windows.delete(key);
+        }
+    }
+}
+//# sourceMappingURL=rate-limit.js.map
