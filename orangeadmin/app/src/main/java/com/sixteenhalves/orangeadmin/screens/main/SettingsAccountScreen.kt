@@ -15,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.sixteenhalves.orangeadmin.R
@@ -34,6 +36,7 @@ import com.sixteenhalves.orangeadmin.viewmodels.AuthViewModel
 fun SettingsAccountScreen(modifier: Modifier = Modifier, authViewModel: AuthViewModel = hiltViewModel()) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var deletePassword by remember { mutableStateOf("") }
 
     Column (
         modifier = modifier
@@ -125,12 +128,27 @@ fun SettingsAccountScreen(modifier: Modifier = Modifier, authViewModel: AuthView
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("Delete Account") },
-            text = { Text("Are you sure you want to delete your account? This action cannot be undone.") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Are you sure you want to delete your account? This action cannot be undone.")
+                    OutlinedTextField(
+                        value = deletePassword,
+                        onValueChange = { deletePassword = it },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    authViewModel.deleteAccount()
-                }) {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        authViewModel.deleteAccount(deletePassword)
+                        deletePassword = ""
+                    },
+                    enabled = deletePassword.isNotEmpty(),
+                ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },

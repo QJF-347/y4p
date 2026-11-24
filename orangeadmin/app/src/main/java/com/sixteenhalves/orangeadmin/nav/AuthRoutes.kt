@@ -51,7 +51,6 @@ fun EntryProviderScope<AppRoute>.authGraph(
     entry<AuthRoutes.AuthLandingRoute> {
         AuthShell(mainViewModel = mainViewModel, authViewModel = authViewModel) {
             AuthLandingScreen(
-                onCreateAccount = { backStack.add(AuthRoutes.CreateAccountRoute) },
                 onLogin = { backStack.add(AuthRoutes.LoginScreenRoute) },
             )
         }
@@ -88,7 +87,6 @@ fun EntryProviderScope<AppRoute>.authGraph(
         AuthShell(mainViewModel = mainViewModel, authViewModel = authViewModel) {
             LoginScreen(
                 authViewModel = authViewModel,
-                onSignUp = { backStack.add(AuthRoutes.CreateAccountRoute) },
                 onForgot = { backStack.add(AuthRoutes.ForgotPassword) },
             )
         }

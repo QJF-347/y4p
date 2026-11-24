@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -23,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,57 +33,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sixteenhalves.orangeadmin.R
+import com.sixteenhalves.orangeadmin.domain.InventoryProduct
 import com.sixteenhalves.orangeadmin.utils.formatKes
-
-/** v1 contract: low stock is derived; branches use a default threshold of 5. */
-const val LOW_STOCK_THRESHOLD = 5
-
-data class InventoryProduct(
-    val id: String,
-    val name: String,
-    val categoryId: String,
-    val stock: Int,
-    val priceCents: Long,
-) {
-    val isLowStock: Boolean get() = stock <= LOW_STOCK_THRESHOLD
-}
-
-object MockCategoryData {
-    const val FRESH_PRODUCE = "019a3c41-1111-7000-8000-000000000001"
-    const val BEVERAGES = "019a3c41-2222-7000-8000-000000000002"
-    const val KITCHENWARE = "019a3c41-3333-7000-8000-000000000003"
-
-    val names =
-        mapOf(
-            FRESH_PRODUCE to "Fresh Produce",
-            BEVERAGES to "Beverages",
-            KITCHENWARE to "Kitchenware",
-        )
-}
-
-object MockInventoryData {
-    val items =
-        listOf(
-            InventoryProduct("019a3c58-0001-7000-8000-000000000001", "Navel Oranges", MockCategoryData.FRESH_PRODUCE, 12, 120),
-            InventoryProduct("019a3c58-0002-7000-8000-000000000002", "Orange Juice (1L)", MockCategoryData.BEVERAGES, 342, 450),
-            InventoryProduct("019a3c58-0003-7000-8000-000000000003", "Grapefruits", MockCategoryData.FRESH_PRODUCE, 5, 150),
-            InventoryProduct("019a3c58-0004-7000-8000-000000000004", "Tangerines", MockCategoryData.FRESH_PRODUCE, 2, 80),
-            InventoryProduct("019a3c58-0005-7000-8000-000000000005", "Apple - Fuji", MockCategoryData.FRESH_PRODUCE, 150, 100),
-            InventoryProduct("019a3c58-0006-7000-8000-000000000006", "Banana", MockCategoryData.FRESH_PRODUCE, 85, 50),
-            InventoryProduct("019a3c58-0007-7000-8000-000000000007", "Citrus Peeler", MockCategoryData.KITCHENWARE, 42, 500),
-            InventoryProduct("019a3c58-0008-7000-8000-000000000008", "Organic Lemonade", MockCategoryData.BEVERAGES, 120, 350),
-        )
-}
 
 @Composable
 fun PopulatedInventory(
-    onNavigateAddNewItem: () -> Unit,
+    products: List<InventoryProduct>,
+    onNavigateAddNewItem: (() -> Unit)?,
     onNavigateBranches: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val products = MockInventoryData.items
-    //variables: total number of items, low stock items, all products: name, category, stock, price
-    // pushes: {branch_id, name, category_id, stock_quantity, price_cents} (DATA_CONTRACT.md)
+    val totalUnits = products.sumOf { it.stock }
+    val lowStockCount = products.count { it.isLowStock }
 
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
@@ -101,13 +62,13 @@ fun PopulatedInventory(
             ) {
                 InventoryOverviewCard(
                     title = "Total Items",
-                    value = "1,245",
+                    value = totalUnits.toString(),
                     subtitle = "In Stock",
                     modifier = Modifier.weight(1f),
                 )
                 InventoryOverviewCard(
                     title = "Low Stock",
-                    value = "3",
+                    value = lowStockCount.toString(),
                     subtitle = "Needs Attention",
                     isAlert = true,
                     modifier = Modifier.weight(1f),
@@ -122,15 +83,27 @@ fun PopulatedInventory(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(onClick = {onNavigateAddNewItem()}, colors = ButtonDefaults
-                    .buttonColors(containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary)) {
-                    Text("Add New Product(s)", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodySmall)
+                if (onNavigateAddNewItem != null) {
+                    Button(
+                        onClick = { onNavigateAddNewItem() },
+                        colors = ButtonDefaults
+                            .buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                    ) {
+                        Text("Add New Product(s)", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
 
-                Button(onClick = {onNavigateBranches()}, colors = ButtonDefaults
-                    .buttonColors(containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary)) {
+                Button(
+                    onClick = { onNavigateBranches() },
+                    colors = ButtonDefaults
+                        .buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                ) {
                     Text("Re-Stock Branch Products", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -145,8 +118,8 @@ fun PopulatedInventory(
             )
         }
 
-        items(products.size) { index ->
-            ProductCard(product = products[index])
+        items(products, key = { it.id }) { product ->
+            ProductCard(product = product)
         }
     }
 }
@@ -248,8 +221,7 @@ private fun ProductCard(product: InventoryProduct) {
                             .clip(CircleShape)
                             .background(
                                 if (product.isLowStock) {
-                                    MaterialTheme
-                                        .colorScheme.errorContainer
+                                    MaterialTheme.colorScheme.errorContainer
                                 } else {
                                     MaterialTheme.colorScheme.surface
                                 },
@@ -274,7 +246,11 @@ private fun ProductCard(product: InventoryProduct) {
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = MockCategoryData.names[product.categoryId] ?: "Uncategorized",
+                        text =
+                            listOfNotNull(
+                                product.categoryName.takeUnless { it.isBlank() },
+                                product.branchName.takeUnless { it.isBlank() },
+                            ).joinToString(" · ").ifBlank { "Uncategorized" },
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

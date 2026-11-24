@@ -21,12 +21,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,36 +38,88 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.R
+import com.sixteenhalves.orangeadmin.domain.BranchDetail
+import com.sixteenhalves.orangeadmin.domain.DeviceInfo
+import com.sixteenhalves.orangeadmin.domain.InventoryProduct
+import com.sixteenhalves.orangeadmin.domain.UiState
 import com.sixteenhalves.orangeadmin.utils.formatKes
-
-data class InventoryItem(
-    val id: String,
-    val name: String,
-    val quantity: Int,
-    val isLowStock: Boolean = false,
-)
+import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
 
 @Composable
 fun BranchDetailScreen(
+    mainViewModel: MainViewModel,
     branchId: String,
     onAddDevice: () -> Unit,
     onAddInventory: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    canManage: Boolean = true,
+) {
+    val state by mainViewModel.branchDetail.collectAsStateWithLifecycle()
+
+    LaunchedEffect(branchId) {
+        mainViewModel.openBranch(branchId)
+    }
+
+    when (val current = state) {
+        is UiState.Loading -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+
+        is UiState.Failed -> {
+            BranchDetailError(
+                message = current.message,
+                onRetry = { mainViewModel.openBranch(branchId) },
+                onBack = onBack,
+                modifier = modifier,
+            )
+        }
+
+        is UiState.Empty -> {
+            BranchDetailError(
+                message = "We couldn't find the details for this branch. It may have been removed or deactivated.",
+                onRetry = { mainViewModel.openBranch(branchId) },
+                onBack = onBack,
+                modifier = modifier,
+            )
+        }
+
+        is UiState.Ready -> {
+            BranchDetailContent(
+                detail = current.value,
+                onAddDevice = onAddDevice,
+                onAddInventory = onAddInventory,
+                canManage = canManage,
+                modifier = modifier,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BranchDetailContent(
+    detail: BranchDetail,
+    onAddDevice: () -> Unit,
+    onAddInventory: () -> Unit,
+    canManage: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
+    val branch = detail.branch
+    val stats = detail.stats
+    val products = detail.products
+    val devices = detail.devices
 
-    // Fetch branch using the mock repository
-    val branch = MockBranchData.branches.find { it.id == branchId }
-    val devicesCount = MockBranchData.stats[branchId]?.devicesCount ?: 0
-
-    // Mock inventory shares the same contract-aligned records as the inventory screen,
-    // so ids/stock stay consistent across screens.
-    val fullInventory =
-        MockInventoryData.items.map {
-            InventoryItem(it.id, it.name, it.stock, isLowStock = it.isLowStock)
-        }
+    val totalStock = products.sumOf { it.stock }
+    val lowStockCount = products.count { it.isLowStock }
+    val topSeller = stats.topSellers.firstOrNull()
 
     Column(
         modifier =
@@ -73,57 +128,6 @@ fun BranchDetailScreen(
                 .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp, vertical = 32.dp),
     ) {
-        if (branch == null) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(top = 64.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                ) {
-                    Column(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(40.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.outline_error_24),
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.error),
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            text = "Branch Not Found",
-                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "We couldn't find the details for this branch. It may have been removed or deactivated.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Button(
-                            onClick = onBack,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(48.dp),
-                        ) {
-                            Text("Return to Branches", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
-                        }
-                    }
-                }
-            }
-            return
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -137,7 +141,7 @@ fun BranchDetailScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = branch.location,
+                    text = branch.location.ifBlank { branch.code },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyLarge,
                 )
@@ -148,7 +152,6 @@ fun BranchDetailScreen(
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Metrics Section
         SectionHeader("Sales Overview")
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -156,19 +159,18 @@ fun BranchDetailScreen(
         ) {
             MetricCard(
                 title = "Today's Sales",
-                value = formatKes(MockBranchData.stats[branchId]?.todaySalesCents ?: 0L),
+                value = formatKes(stats.todaySalesCents),
                 modifier = Modifier.weight(1f),
             )
             MetricCard(
                 title = "Total Devices",
-                value = devicesCount.toString(),
+                value = stats.devicesCount.toString(),
                 modifier = Modifier.weight(1f),
             )
         }
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Inventory Insights Section
         SectionHeader("Inventory Insights")
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -176,13 +178,13 @@ fun BranchDetailScreen(
         ) {
             InsightCard(
                 title = "Total Stock",
-                value = "1,245",
+                value = totalStock.toString(),
                 subtitle = "Units available",
                 modifier = Modifier.weight(1f),
             )
             InsightCard(
                 title = "Low Stock",
-                value = "3",
+                value = lowStockCount.toString(),
                 subtitle = "Items depleting",
                 isAlert = true,
                 modifier = Modifier.weight(1f),
@@ -195,32 +197,32 @@ fun BranchDetailScreen(
         ) {
             InsightCard(
                 title = "Top Seller",
-                value = "Orange Juice",
-                subtitle = "342 units sold",
+                value = topSeller?.name ?: "—",
+                subtitle = topSeller?.let { "${it.quantitySold} units sold" } ?: "No sales yet today",
                 modifier = Modifier.weight(1f),
             )
             InsightCard(
-                title = "Least Sold",
-                value = "Citrus Peeler",
-                subtitle = "4 units sold",
+                title = "Products",
+                value = products.size.toString(),
+                subtitle = "In catalog",
                 modifier = Modifier.weight(1f),
             )
         }
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Full Inventory Section
         InventorySection(
-            fullInventory = fullInventory,
-            onAddInventory = onAddInventory
+            products = products,
+            onAddInventory = onAddInventory,
+            canManage = canManage,
         )
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Devices Section
         DevicesSection(
-            devicesCount = devicesCount,
-            onAddDevice = onAddDevice
+            devices = devices,
+            onAddDevice = onAddDevice,
+            canManage = canManage,
         )
 
         Spacer(modifier = Modifier.height(80.dp))
@@ -228,9 +230,72 @@ fun BranchDetailScreen(
 }
 
 @Composable
+private fun BranchDetailError(
+    message: String,
+    onRetry: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.fillMaxSize().padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.outline_error_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "Branch Not Found",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = onRetry,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp),
+                    ) {
+                        Text("Try again", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                    }
+                    Button(
+                        onClick = onBack,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(48.dp),
+                    ) {
+                        Text("Return", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun InventorySection(
-    fullInventory: List<InventoryItem>,
-    onAddInventory: () -> Unit
+    products: List<InventoryProduct>,
+    onAddInventory: () -> Unit,
+    canManage: Boolean,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -238,18 +303,20 @@ private fun InventorySection(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SectionHeader("Inventory Management", paddingBottom = 0.dp)
-        IconButton(
-            onClick = onAddInventory,
-            modifier =
-                Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
-                contentDescription = "Add Item",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+        if (canManage) {
+            IconButton(
+                onClick = onAddInventory,
+                modifier =
+                    Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
+                    contentDescription = "Add Item",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
     }
     Spacer(modifier = Modifier.height(16.dp))
@@ -261,65 +328,73 @@ private fun InventorySection(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
-            fullInventory.forEachIndexed { index, item ->
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                        Text(
-                            text = item.name,
-                            fontWeight = FontWeight.ExtraBold,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val textColor =
-                            if (item.isLowStock) {
-                                MaterialTheme
-                                    .colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        val fontWeight = if (item.isLowStock) FontWeight.Bold else FontWeight.Normal
-                        Text(
-                            text = "${item.quantity} units remaining",
-                            color = textColor,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = fontWeight),
-                        )
-                    }
-                    Button(
-                        onClick = onAddInventory,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        modifier = Modifier.height(40.dp),
-                        colors =
-                            ButtonDefaults.buttonColors(
-                                containerColor =
-                                    if (item.isLowStock) {
-                                        MaterialTheme
-                                            .colorScheme.errorContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    },
-                                contentColor =
-                                    if (item.isLowStock) {
-                                        MaterialTheme
-                                            .colorScheme.onErrorContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    },
-                            ),
+            if (products.isEmpty()) {
+                Text(
+                    text = "No products have been added to this branch yet.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            } else {
+                products.forEachIndexed { index, item ->
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Restock", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                            Text(
+                                text = item.name,
+                                fontWeight = FontWeight.ExtraBold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val textColor =
+                                if (item.isLowStock) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            val fontWeight = if (item.isLowStock) FontWeight.Bold else FontWeight.Normal
+                            Text(
+                                text = "${item.stock} units remaining · ${formatKes(item.priceCents)}",
+                                color = textColor,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = fontWeight),
+                            )
+                        }
+                        if (canManage) {
+                            Button(
+                                onClick = onAddInventory,
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                modifier = Modifier.height(40.dp),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor =
+                                            if (item.isLowStock) {
+                                                MaterialTheme.colorScheme.errorContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            },
+                                        contentColor =
+                                            if (item.isLowStock) {
+                                                MaterialTheme.colorScheme.onErrorContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSecondaryContainer
+                                            },
+                                    ),
+                            ) {
+                                Text("Restock", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
                     }
-                }
-                if (index < fullInventory.size - 1) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    if (index < products.size - 1) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    }
                 }
             }
         }
@@ -328,8 +403,9 @@ private fun InventorySection(
 
 @Composable
 private fun DevicesSection(
-    devicesCount: Int,
-    onAddDevice: () -> Unit
+    devices: List<DeviceInfo>,
+    onAddDevice: () -> Unit,
+    canManage: Boolean,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -337,7 +413,7 @@ private fun DevicesSection(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SectionHeader("POS Devices", paddingBottom = 0.dp)
-        if (devicesCount > 0) {
+        if (canManage) {
             IconButton(
                 onClick = onAddDevice,
                 modifier =
@@ -355,7 +431,7 @@ private fun DevicesSection(
     }
     Spacer(modifier = Modifier.height(16.dp))
 
-    if (devicesCount == 0) {
+    if (devices.isEmpty()) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
@@ -406,7 +482,7 @@ private fun DevicesSection(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         ) {
             Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
-                repeat(devicesCount) { index ->
+                devices.forEachIndexed { index, device ->
                     Row(
                         modifier =
                             Modifier
@@ -417,25 +493,30 @@ private fun DevicesSection(
                     ) {
                         Column {
                             Text(
-                                text = "Device ${index + 1}",
+                                text = device.name.ifBlank { "POS Device" },
                                 fontWeight = FontWeight.ExtraBold,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Serial: XYZ-${1000 + index}",
+                                text = "Code: ${device.code}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Text(
-                            text = "Active",
-                            color = MaterialTheme.colorScheme.primary,
+                            text = if (device.isRevoked) "Revoked" else "Active",
+                            color =
+                                if (device.isRevoked) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         )
                     }
-                    if (index < devicesCount - 1) {
+                    if (index < devices.size - 1) {
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
                         )

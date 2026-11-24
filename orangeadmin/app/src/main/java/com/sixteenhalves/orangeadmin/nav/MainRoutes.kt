@@ -1,5 +1,7 @@
 package com.sixteenhalves.orangeadmin.nav
 
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.EntryProviderScope
 import com.sixteenhalves.orangeadmin.screens.main.AddInventoryItemScreen
 import com.sixteenhalves.orangeadmin.screens.main.BranchAddInventoryScreen
@@ -32,7 +34,9 @@ sealed interface MainRoutes : AppRoute {
 sealed interface InventoryRoutes : AppRoute {
     @Serializable data object Home : InventoryRoutes
 
-    @Serializable data object AddNewItem : InventoryRoutes
+    @Serializable data class AddNewItem(
+        val branchId: String? = null,
+    ) : InventoryRoutes
 }
 
 @Serializable
@@ -41,9 +45,13 @@ sealed interface BranchRoutes : AppRoute {
 
     @Serializable data object Name : BranchRoutes
 
-    @Serializable data object Location : BranchRoutes
+    @Serializable data class Location(
+        val name: String,
+    ) : BranchRoutes
 
-    @Serializable data object Device : BranchRoutes
+    @Serializable data class Device(
+        val branchId: String,
+    ) : BranchRoutes
 
     @Serializable data class AddInventory(
         val branchId: String,
@@ -74,93 +82,118 @@ fun EntryProviderScope<AppRoute>.mainGraph(
     mainViewModel: MainViewModel,
 ) {
     entry<MainRoutes.HomeRoute> {
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             HomeScreen(
                 mainViewModel = mainViewModel,
                 onNewBranch =
                     { backStack.add(BranchRoutes.Name) },
+                canManage = canManage,
             )
         }
     }
 
     entry<InventoryRoutes.Home> {
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             InventoryScreen(
                 mainViewModel = mainViewModel,
                 onNewBranch = { backStack.add(BranchRoutes.Name) },
-                onNavigateAddNewItem = { backStack.add(InventoryRoutes.AddNewItem) },
-                onNavigateBranch = { backStack.add(BranchRoutes.Home)}
+                onNavigateAddNewItem = { backStack.add(InventoryRoutes.AddNewItem()) },
+                onNavigateBranch = { backStack.add(BranchRoutes.Home)},
+                canManage = canManage,
             )
         }
     }
 
-    entry<InventoryRoutes.AddNewItem> {
+    entry<InventoryRoutes.AddNewItem> { route ->
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             AddInventoryItemScreen(
+                mainViewModel = mainViewModel,
+                initialBranchId = route.branchId,
                 onBack = { backStack.removeLastOrNull() },
+                canManage = canManage,
             )
         }
     }
 
     entry<BranchRoutes.Home> {
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             BranchesScreen(
+                mainViewModel = mainViewModel,
                 onNewBranch = { backStack.add(BranchRoutes.Name) },
                 onBranchClick = { branchId -> backStack.add(BranchRoutes.Detail(branchId)) },
+                canManage = canManage,
             )
         }
     }
     entry<BranchRoutes.Name> {
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
-            BranchNameScreen(
-                onNext = { _ ->
-                    backStack.add(BranchRoutes.Location)
-                },
-            )
+            if (canManage) {
+                BranchNameScreen(
+                    onNext = { name ->
+                        backStack.add(BranchRoutes.Location(name))
+                    },
+                )
+            } else {
+                androidx.compose.material3.Text("Only owners can create branches.")
+            }
         }
     }
-    entry<BranchRoutes.Location> {
+    entry<BranchRoutes.Location> { route ->
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
-            BranchLocationScreen(
-                onComplete = {
-                    backStack.removeLastOrNull()
-                    backStack.removeLastOrNull()
-                    // It should trigger an api call that adds the new location
-                    // then either with the viewmodel after receiving the new branch_id from
-                    // the server add to the navigation stack the new location
-                    // or handle the error gracefully
-                    backStack.add(BranchRoutes.Detail("NEW_BRANCH_ID"))
-                },
-            )
+            if (canManage) {
+                BranchLocationScreen(
+                    onComplete = { location ->
+                        mainViewModel.createBranch(name = route.name, location = location) { branchId ->
+                            backStack.removeLastOrNull()
+                            backStack.removeLastOrNull()
+                            backStack.add(BranchRoutes.Detail(branchId))
+                        }
+                    },
+                )
+            } else {
+                androidx.compose.material3.Text("Only owners can create branches.")
+            }
         }
     }
-    entry<BranchRoutes.Device> {
+    entry<BranchRoutes.Device> { route ->
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             BranchDeviceScreen(
-                onSave = {
-                    // It should trigger an API call that registers the device and refreshes the stale pos device data
-                    // then return to the detail screen
-                    backStack.removeLastOrNull()
-                },
+                mainViewModel = mainViewModel,
+                branchId = route.branchId,
+                onSave = { backStack.removeLastOrNull() },
+                canManage = canManage,
             )
         }
     }
     entry<BranchRoutes.Detail> { route ->
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             BranchDetailScreen(
+                mainViewModel = mainViewModel,
                 branchId = route.branchId,
-                onAddDevice = { backStack.add(BranchRoutes.Device) },
+                onAddDevice = { backStack.add(BranchRoutes.Device(route.branchId)) },
                 onAddInventory = { backStack.add(BranchRoutes.AddInventory(route.branchId)) },
                 onBack = { backStack.removeLastOrNull() },
+                canManage = canManage,
             )
         }
     }
     entry<BranchRoutes.AddInventory> { route ->
+        val canManage by mainViewModel.isOwner.collectAsStateWithLifecycle()
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
             BranchAddInventoryScreen(
+                mainViewModel = mainViewModel,
                 branchId = route.branchId,
                 onBack = { backStack.removeLastOrNull() },
-                onAddNewItem = { backStack.add(InventoryRoutes.AddNewItem) }
+                onAddNewItem = { backStack.add(InventoryRoutes.AddNewItem(route.branchId)) },
+                canManage = canManage,
             )
         }
     }

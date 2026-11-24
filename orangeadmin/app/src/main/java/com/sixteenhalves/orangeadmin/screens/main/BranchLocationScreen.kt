@@ -23,7 +23,7 @@ import com.sixteenhalves.orangeadmin.components.shared.SharedTextField
 
 @Composable
 fun BranchLocationScreen(
-    onComplete: () -> Unit,
+    onComplete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var county by remember { mutableStateOf("") }
@@ -80,8 +80,7 @@ fun BranchLocationScreen(
 
         Button(
             onClick = {
-                // TODO: Handle sending branch name, county, constituency, and ward info to the server
-                onComplete()
+                onComplete(listOf(ward, constituency, county).joinToString(", ") { it.trim() })
             },
             modifier =
                 Modifier

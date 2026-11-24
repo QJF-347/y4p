@@ -41,13 +41,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sixteenhalves.orangeadmin.R
+import com.sixteenhalves.orangeadmin.domain.BranchOverview
+import com.sixteenhalves.orangeadmin.domain.DashboardSummary
+import com.sixteenhalves.orangeadmin.domain.TopSeller
+import com.sixteenhalves.orangeadmin.utils.formatKes
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
-fun PopulatedDashboard(modifier: Modifier = Modifier) {
+fun PopulatedDashboard(
+    summary: DashboardSummary,
+    branchOverviews: List<BranchOverview>,
+    modifier: Modifier = Modifier,
+) {
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
         contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 32.dp, bottom = 120.dp),
@@ -61,29 +70,28 @@ fun PopulatedDashboard(modifier: Modifier = Modifier) {
 
         item {
             AnimatedDashboardItem(index = 1) {
-                MainSalesCard()
+                MainSalesCard(summary = summary)
             }
         }
 
         item {
             AnimatedDashboardItem(index = 2) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Max),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Max),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     SecondaryMetricCard(
                         title = "Orders Today",
-                        value = "142",
-                        trend = "+12%",
+                        value = summary.salesTodayCount.toString(),
                         iconRes = R.drawable.baseline_point_of_sale_24,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     SecondaryMetricCard(
                         title = "Active Branches",
-                        value = "3",
-                        trend = "Stable",
+                        value = summary.branchesCount.toString(),
                         iconRes = R.drawable.outline_call_split_24,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
@@ -93,21 +101,57 @@ fun PopulatedDashboard(modifier: Modifier = Modifier) {
 
         item {
             AnimatedDashboardItem(index = 3) {
-                WeeklySalesChart()
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Max),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    SecondaryMetricCard(
+                        title = "POS Devices",
+                        value = summary.activeDevices.toString(),
+                        iconRes = R.drawable.baseline_point_of_sale_24,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                    SecondaryMetricCard(
+                        title = "Low Stock Items",
+                        value = summary.lowStockItems.toString(),
+                        iconRes = R.drawable.baseline_inventory_2_24,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
+            }
+        }
+
+        if (summary.pendingPayments > 0) {
+            item {
+                AnimatedDashboardItem(index = 4) {
+                    PendingPaymentsCard(count = summary.pendingPayments)
+                }
+            }
+        }
+
+        if (branchOverviews.isNotEmpty()) {
+            item {
+                AnimatedDashboardItem(index = 5) {
+                    BranchSalesChart(
+                        branches =
+                            branchOverviews
+                                .filter { it.stats.todaySalesCents > 0 }
+                                .sortedByDescending { it.stats.todaySalesCents }
+                                .take(7),
+                    )
+                }
             }
         }
 
         item {
-            AnimatedDashboardItem(index = 4) {
-                TopProductsList()
+            AnimatedDashboardItem(index = 6) {
+                TopProductsList(topSellers = summary.topSellers)
             }
         }
     }
-}
-
-private fun calculatePercentageDifference(today: Number, yesterday: Number): Float {
-    val difference = today.toFloat() - yesterday.toFloat()
-    return (difference / yesterday.toFloat()) * 100f
 }
 
 @Composable
@@ -116,9 +160,6 @@ private fun AnimatedDashboardItem(
     content: @Composable () -> Unit,
 ) {
     var visible by remember { mutableStateOf(false) }
-    // variables: total revenue today and previous day, active branches, total number of orders today & orders the previous day, top products of the past week (3) and their total count
-    // also will receive the total sales of the previous week up to the present day ({Monday: 123}) example
-    // will use calculatePercentageDifference to find the difference
 
     LaunchedEffect(Unit) {
         delay((index * 120L).milliseconds)
@@ -156,7 +197,7 @@ private fun DashboardHeader() {
 }
 
 @Composable
-private fun MainSalesCard() {
+private fun MainSalesCard(summary: DashboardSummary) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -172,7 +213,7 @@ private fun MainSalesCard() {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Total Revenue",
+                    text = "Sales Today",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                 )
@@ -194,7 +235,7 @@ private fun MainSalesCard() {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "KSh 4,250.80",
+                text = formatKes(summary.salesTodayCents),
                 style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black),
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
@@ -202,7 +243,7 @@ private fun MainSalesCard() {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "+8.5% from yesterday",
+                text = "${summary.salesTodayCount} completed orders",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.tertiary,
             )
@@ -214,7 +255,6 @@ private fun MainSalesCard() {
 private fun SecondaryMetricCard(
     title: String,
     value: String,
-    trend: String,
     iconRes: Int,
     modifier: Modifier = Modifier,
 ) {
@@ -254,10 +294,31 @@ private fun SecondaryMetricCard(
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun PendingPaymentsCard(count: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = trend,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                text = "Pending Payments",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
                 color = MaterialTheme.colorScheme.primary,
             )
         }
@@ -265,25 +326,15 @@ private fun SecondaryMetricCard(
 }
 
 @Composable
-private fun WeeklySalesChart(
-    salesData: List<Pair<String, Float>> = listOf(
-        "M" to 140f,
-        "T" to 160f,
-        "W" to 150f,
-        "T" to 180f,
-        "F" to 170f,
-        "S" to 190f,
-        "S" to 165f
-    )
-) {
+private fun BranchSalesChart(branches: List<BranchOverview>) {
     var startAnimation by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(600.milliseconds)
         startAnimation = true
     }
 
-    val maxSale = salesData.maxOfOrNull { it.second } ?: 1f
-    val maxIndex = salesData.indexOfFirst { it.second == maxSale }
+    val maxSale = branches.maxOfOrNull { it.stats.todaySalesCents.toFloat() } ?: 1f
+    val maxIndex = branches.indexOfFirst { it.stats.todaySalesCents.toFloat() == maxSale }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -293,7 +344,7 @@ private fun WeeklySalesChart(
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
             Text(
-                text = "Weekly Overview",
+                text = "Sales by Branch (Today)",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -307,41 +358,30 @@ private fun WeeklySalesChart(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom,
             ) {
-                salesData.forEachIndexed { index, (day, sale) ->
+                branches.forEachIndexed { index, overview ->
+                    val sale = overview.stats.todaySalesCents.toFloat()
                     val targetHeight = if (maxSale > 0) sale / maxSale else 0f
                     val animatedHeight by animateFloatAsState(
                         targetValue = if (startAnimation) targetHeight else 0f,
                         animationSpec = tween(durationMillis = 800, delayMillis = index * 50, easing = FastOutSlowInEasing),
                         label = "bar_anim_$index",
                     )
-                    
-                    val textAlpha by animateFloatAsState(
-                        targetValue = if (startAnimation) 1f else 0f,
-                        animationSpec = tween(durationMillis = 800, delayMillis = index * 50, easing = FastOutSlowInEasing),
-                        label = "alpha_anim_$index"
-                    )
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Bottom,
-                        modifier = Modifier.fillMaxHeight(),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Bottom,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
                         ) {
-                            Text(
-                                text = sale.toInt().toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = textAlpha),
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            )
                             Box(
                                 modifier =
                                     Modifier
                                         .width(24.dp)
-                                        .fillMaxHeight(fraction = animatedHeight.coerceAtLeast(0.01f))
+                                        .fillMaxHeight(fraction = animatedHeight.coerceIn(0.02f, 1f))
                                         .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                                         .background(
                                             if (index == maxIndex) {
@@ -354,9 +394,11 @@ private fun WeeklySalesChart(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = day,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            text = overview.branch.name,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -366,14 +408,7 @@ private fun WeeklySalesChart(
 }
 
 @Composable
-private fun TopProductsList() {
-    val products =
-        listOf(
-            Pair("Navel Oranges", "120 units"),
-            Pair("Orange Juice (1L)", "85 units"),
-            Pair("Grapefruits", "42 units"),
-        )
-
+private fun TopProductsList(topSellers: List<TopSeller>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -388,46 +423,56 @@ private fun TopProductsList() {
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            products.forEachIndexed { index, product ->
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier =
-                                Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surface),
-                            contentAlignment = Alignment.Center,
-                        ) {
+            if (topSellers.isEmpty()) {
+                Text(
+                    text = "No sales recorded yet today.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                topSellers.forEachIndexed { index, product ->
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier =
+                                    Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surface),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "${index + 1}",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
                             Text(
-                                text = "${index + 1}",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                                color = MaterialTheme.colorScheme.primary,
+                                text = product.name,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
                         Text(
-                            text = product.first,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface,
+                            text = "${product.quantitySold} sold",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        text = product.second,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
 
-                if (index < products.size - 1) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    if (index < topSellers.size - 1) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    }
                 }
             }
         }

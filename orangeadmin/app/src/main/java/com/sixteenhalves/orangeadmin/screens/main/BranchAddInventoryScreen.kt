@@ -22,13 +22,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,28 +43,59 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.R
+import com.sixteenhalves.orangeadmin.domain.InventoryProduct
+import com.sixteenhalves.orangeadmin.domain.UiState
+import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
 
 @Composable
 fun BranchAddInventoryScreen(
+    mainViewModel: MainViewModel,
     branchId: String,
     onBack: () -> Unit,
     onAddNewItem: () -> Unit,
     modifier: Modifier = Modifier,
+    canManage: Boolean = true,
 ) {
-    // We get the full mock inventory to display, sorted to show low stock first
-    val originalItems = remember { MockInventoryData.items.sortedBy { !it.isLowStock } }
+    val detailState by mainViewModel.branchDetail.collectAsStateWithLifecycle()
 
-    val quantities =
-        remember {
-            androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
-                originalItems.forEach { put(it.id, it.stock) }
+    LaunchedEffect(branchId) {
+        mainViewModel.openBranch(branchId)
+    }
+
+    val products: List<InventoryProduct> =
+        ((detailState as? UiState.Ready)?.value)?.products.orEmpty()
+
+    val quantities = remember { mutableStateMapOf<String, Int>() }
+    val deletedItems = remember { mutableStateListOf<String>() }
+    // Last stock value seen from the server per product, used as the
+    // baseline for conflict detection when saving absolute quantities.
+    val serverStock = remember { mutableStateMapOf<String, Int>() }
+    var saving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(products) {
+        val productIds = products.map { it.id }.toSet()
+        deletedItems.removeAll { it !in productIds }
+        quantities.keys.toList().forEach { id -> if (id !in productIds) quantities.remove(id) }
+        serverStock.keys.toList().forEach { id -> if (id !in productIds) serverStock.remove(id) }
+        products.forEach { product ->
+            val known = serverStock[product.id]
+            if (known == null || known != product.stock) {
+                // First load, or the server value changed: adopt it.
+                serverStock[product.id] = product.stock
+                quantities[product.id] = product.stock
             }
         }
-    val deletedItems = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    }
 
-    val displayItems = originalItems.filter { it.id !in deletedItems }
-    val hasChanges = deletedItems.isNotEmpty() || originalItems.any { it.stock != quantities[it.id] }
+    val displayItems =
+        products
+            .filter { it.id !in deletedItems }
+            .sortedBy { !it.isLowStock }
+    val hasChanges =
+        deletedItems.isNotEmpty() ||
+            products.any { it.id !in deletedItems && (quantities[it.id] ?: it.stock) != it.stock }
 
     Column(
         modifier =
@@ -96,73 +131,158 @@ fun BranchAddInventoryScreen(
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 0.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        when (val current = detailState) {
+            is UiState.Loading -> {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            is UiState.Failed -> {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = "Available Items (${displayItems.size})",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = current.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
                     )
-                    IconButton(
-                        onClick = onAddNewItem,
-                        modifier =
-                            Modifier
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
-                            contentDescription = "Create New Item",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(onClick = { mainViewModel.openBranch(branchId) }, shape = RoundedCornerShape(12.dp)) {
+                        Text("Try again")
+                    }
+                }
+            }
+
+            is UiState.Empty -> {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "This branch has no products yet. Add a new item to get started.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
+            is UiState.Ready -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 0.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Available Items (${displayItems.size})",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            if (canManage) {
+                                IconButton(
+                                    onClick = onAddNewItem,
+                                    modifier =
+                                        Modifier
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
+                                        contentDescription = "Create New Item",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    items(displayItems, key = { it.id }) { item ->
+                        AddInventoryCard(
+                            item = item,
+                            quantity = quantities[item.id] ?: item.stock,
+                            onQuantityChange = { quantities[item.id] = it },
+                            onDelete = { deletedItems.add(item.id) },
+                            canManage = canManage,
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
 
-            items(displayItems, key = { it.id }) { item ->
-                AddInventoryCard(
-                    item = item,
-                    quantity = quantities[item.id] ?: item.stock,
-                    onQuantityChange = { quantities[item.id] = it },
-                    onDelete = { deletedItems.add(item.id) },
-                )
-            }
-        }
-
-        // Save Changes Action Button
-        Box(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(24.dp),
-        ) {
-            Button(
-                onClick = {
-                    // Trigger api to save changes
-                    onBack()
-                },
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                enabled = hasChanges,
-            ) {
-                Text(
-                    text = "Save Changes",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                )
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(24.dp),
+                ) {
+                    if (!canManage) {
+                        Text(
+                            text = "Read-only access. Ask an owner to change this inventory.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Button(
+                            onClick = {
+                                val restocks =
+                                    products
+                                        .filter { it.id !in deletedItems }
+                                        .mapNotNull { product ->
+                                            val quantity = quantities[product.id] ?: product.stock
+                                            if (quantity != product.stock) product.id to quantity else null
+                                        }.toMap()
+                                val baseline =
+                                    restocks.keys
+                                        .mapNotNull { id -> serverStock[id]?.let { id to it } }
+                                        .toMap()
+                                saving = true
+                                mainViewModel.saveInventoryChanges(
+                                    branchId = branchId,
+                                    baseline = baseline,
+                                    restocks = restocks,
+                                    deletions = deletedItems.toSet(),
+                                ) { success ->
+                                    saving = false
+                                    if (success) onBack()
+                                }
+                            },
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            enabled = hasChanges && !saving,
+                        ) {
+                            if (saving) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            } else {
+                                Text(
+                                    text = "Save Changes",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -174,6 +294,7 @@ private fun AddInventoryCard(
     quantity: Int,
     onQuantityChange: (Int) -> Unit,
     onDelete: () -> Unit,
+    canManage: Boolean,
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -234,39 +355,40 @@ private fun AddInventoryCard(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Actions Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                // Delete Button
-                TextButton(
-                    onClick = { showDeleteDialog = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                ) {
-                    Text("Remove", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                if (canManage) {
+                    TextButton(
+                        onClick = { showDeleteDialog = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Text("Remove", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                    }
                 }
 
-                // Quantity Adjuster
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    IconButton(
-                        onClick = { if (quantity > 0) onQuantityChange(quantity - 1) },
-                        modifier =
-                            Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.outline_remove_24),
-                            contentDescription = "Decrease",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    if (canManage) {
+                        IconButton(
+                            onClick = { if (quantity > 0) onQuantityChange(quantity - 1) },
+                            modifier =
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.outline_remove_24),
+                                contentDescription = "Decrease",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
 
                     Text(
@@ -277,20 +399,22 @@ private fun AddInventoryCard(
                         textAlign = TextAlign.Center,
                     )
 
-                    IconButton(
-                        onClick = { onQuantityChange(quantity + 1) },
-                        modifier =
-                            Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
-                            contentDescription = "Increase",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
+                    if (canManage) {
+                        IconButton(
+                            onClick = { onQuantityChange(quantity + 1) },
+                            modifier =
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
+                                contentDescription = "Increase",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
                     }
                 }
             }

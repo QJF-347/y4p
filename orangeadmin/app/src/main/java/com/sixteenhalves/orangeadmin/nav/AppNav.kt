@@ -56,6 +56,12 @@ fun AppNav(
     }
     val snackbarHostState = mainViewModel.snackbarHostState
 
+    LaunchedEffect(unifiedState is ApplicationState.Authenticated) {
+        if (unifiedState is ApplicationState.Authenticated) {
+            mainViewModel.refreshAll()
+        }
+    }
+
     LaunchedEffect(Unit) {
         EventManager.channelFlow.collect { event ->
             when (event) {

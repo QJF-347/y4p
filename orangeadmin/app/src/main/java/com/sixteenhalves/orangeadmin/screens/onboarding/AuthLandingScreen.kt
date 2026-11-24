@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -33,7 +32,6 @@ import com.sixteenhalves.orangeadmin.R
 
 @Composable
 fun AuthLandingScreen(
-    onCreateAccount: () -> Unit,
     onLogin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -96,19 +94,6 @@ fun AuthLandingScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Button(
-                onClick = onCreateAccount,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    text = "Get Started",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
-
-            OutlinedButton(
                 onClick = onLogin,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,11 +101,18 @@ fun AuthLandingScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = "I already have an account",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary
+                    text = "Sign in",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
                 )
             }
+
+            Text(
+                text = "Admin accounts are created by your business owner. Use the invite they shared with you to sign in.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
         }
         
         Spacer(modifier = Modifier.height(16.dp))

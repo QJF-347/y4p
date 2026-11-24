@@ -1,9 +1,11 @@
 package com.sixteenhalves.orangeadmin.repository
 
 import com.sixteenhalves.orangeadmin.domain.User
+import com.sixteenhalves.orangeadmin.ntwk.CreateUserRequest
+import com.sixteenhalves.orangeadmin.ntwk.DeleteAccountRequest
 import com.sixteenhalves.orangeadmin.ntwk.NetworkService
+import com.sixteenhalves.orangeadmin.ntwk.RefreshRequest
 import com.sixteenhalves.orangeadmin.viewmodels.AuthLoginFlowData
-import okhttp3.MultipartBody
 import javax.inject.Inject
 
 class UserRepositoryImpl
@@ -12,25 +14,25 @@ class UserRepositoryImpl
         private val networkService: NetworkService,
     ) : UserRepository {
         override suspend fun createUser(
-            email: String,
             name: String,
+            email: String,
             password: String,
-            companyName: String,
-            companyDescription: String,
-            logo: MultipartBody.Part?,
+            role: String,
+            branchIds: List<String>,
         ): Result<User?> =
             try {
                 val response =
                     networkService.createUser(
-                        email,
-                        name,
-                        password,
-                        companyName,
-                        companyDescription,
-                        logo,
+                        CreateUserRequest(
+                            name = name,
+                            email = email,
+                            password = password,
+                            role = role,
+                            branchIds = branchIds,
+                        ),
                     )
                 if (response.isSuccessful) {
-                    Result.success(response.body())
+                    Result.success(response.body()?.user)
                 } else {
                     Result.failure(Exception("Network error: ${response.code()}"))
                 }
@@ -42,7 +44,7 @@ class UserRepositoryImpl
             try {
                 val response = networkService.getUser()
                 if (response.isSuccessful) {
-                    Result.success(response.body())
+                    Result.success(response.body()?.user)
                 } else {
                     Result.failure(Exception("Network error: ${response.code()}"))
                 }
@@ -62,11 +64,11 @@ class UserRepositoryImpl
                 Result.failure(e)
             }
 
-        override suspend fun logoutUser(): Result<User?> =
+        override suspend fun logoutUser(refreshToken: String): Result<Unit> =
             try {
-                val response = networkService.logoutUser()
+                val response = networkService.logoutUser(RefreshRequest(refreshToken))
                 if (response.isSuccessful) {
-                    Result.success(response.body())
+                    Result.success(Unit)
                 } else {
                     Result.failure(Exception("Network error: ${response.code()}"))
                 }
@@ -74,9 +76,9 @@ class UserRepositoryImpl
                 Result.failure(e)
             }
 
-        override suspend fun deleteAccount(): Result<Unit> =
+        override suspend fun deleteAccount(password: String): Result<Unit> =
             try {
-                val response = networkService.deleteUser()
+                val response = networkService.deleteUser(DeleteAccountRequest(password))
                 if (response.isSuccessful) {
                     Result.success(Unit)
                 } else {

@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,21 +36,45 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.R
 import com.sixteenhalves.orangeadmin.components.shared.SharedTextField
+import com.sixteenhalves.orangeadmin.domain.Branch
+import com.sixteenhalves.orangeadmin.domain.UiState
+import com.sixteenhalves.orangeadmin.utils.InventoryInput
+import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
 
 @Composable
 fun AddInventoryItemScreen(
+    mainViewModel: MainViewModel,
+    initialBranchId: String? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    canManage: Boolean = true,
 ) {
     var itemName by remember { mutableStateOf("") }
     var itemCategory by remember { mutableStateOf("") }
     var initialQuantity by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
+    var selectedBranchId by remember { mutableStateOf(initialBranchId) }
 
-    // variables: get all branches {name:"", id: ""}
-    // pushes: {branch_id, name, category_id, stock_quantity, price_cents} (DATA_CONTRACT.md)
+    val branchesState by mainViewModel.branches.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        mainViewModel.refreshBranches()
+    }
+
+    val branches: List<Branch> =
+        ((branchesState as? UiState.Ready)?.value ?: emptyList()).map { it.branch }
+    val selectedBranch: Branch? =
+        branches.firstOrNull { it.id == selectedBranchId } ?: branches.firstOrNull()
+
+    val priceCents = InventoryInput.priceCentsOrNull(price)
+    val parsedQuantity = InventoryInput.quantityOrDefault(initialQuantity)
+    val showPriceError = price.isNotBlank() && priceCents == null
+    val showQuantityError = initialQuantity.isNotBlank() && parsedQuantity == null
+    val formValid =
+        itemName.isNotBlank() && selectedBranch != null && priceCents != null && parsedQuantity != null
 
     Column(
         modifier =
@@ -102,8 +127,6 @@ fun AddInventoryItemScreen(
             )
 
             var branchExpanded by remember { mutableStateOf(false) }
-            val branches = MockBranchData.branches
-            var selectedBranch by remember { mutableStateOf(branches.firstOrNull()) }
 
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -127,7 +150,7 @@ fun AddInventoryItemScreen(
                         @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
                         androidx.compose.material3.ExposedDropdownMenuBox(
                             expanded = branchExpanded,
-                            onExpandedChange = { branchExpanded = it },
+                            onExpandedChange = { if (branches.isNotEmpty()) branchExpanded = it },
                         ) {
                             androidx.compose.material3.OutlinedTextField(
                                 value = selectedBranch?.name ?: "Select a Branch",
@@ -150,12 +173,19 @@ fun AddInventoryItemScreen(
                                     DropdownMenuItem(
                                         text = { Text(branch.name) },
                                         onClick = {
-                                            selectedBranch = branch
+                                            selectedBranchId = branch.id
                                             branchExpanded = false
                                         },
                                     )
                                 }
                             }
+                        }
+                        if (branches.isEmpty()) {
+                            Text(
+                                text = "Create a branch first before adding products.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
                         }
                     }
 
@@ -174,7 +204,7 @@ fun AddInventoryItemScreen(
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "Category",
+                            text = "Category (optional)",
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -197,6 +227,13 @@ fun AddInventoryItemScreen(
                             placeHolderText = "0",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         )
+                        if (showQuantityError) {
+                            Text(
+                                text = "Enter a whole number, e.g. 24",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -208,9 +245,16 @@ fun AddInventoryItemScreen(
                         SharedTextField(
                             value = price,
                             onValueChange = { price = it },
-                            placeHolderText = "0",
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            placeHolderText = "0.00",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         )
+                        if (showPriceError) {
+                            Text(
+                                text = "Enter a price greater than zero, e.g. 120.50",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -224,13 +268,25 @@ fun AddInventoryItemScreen(
                     .padding(24.dp),
         ) {
             Button(
-                onClick = onBack,
+                onClick = {
+                    val branch = selectedBranch ?: return@Button
+                    val cents = priceCents ?: return@Button
+                    val stock = parsedQuantity ?: return@Button
+                    mainViewModel.createProduct(
+                        branchId = branch.id,
+                        name = itemName.trim(),
+                        categoryName = itemCategory.trim().ifBlank { null },
+                        priceCents = cents,
+                        stock = stock,
+                        onCreated = onBack,
+                    )
+                },
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                enabled = itemName.isNotBlank() && itemCategory.isNotBlank(),
+                enabled = canManage && formValid,
             ) {
                 Text(
                     text = "Create Item",

@@ -35,7 +35,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.components.shared.SharedTextField
+import com.sixteenhalves.orangeadmin.domain.ApplicationState
 import com.sixteenhalves.orangeadmin.viewmodels.AuthViewModel
 
 @Composable
@@ -43,10 +45,11 @@ fun LoginScreen(
     authViewModel: AuthViewModel,
     modifier: Modifier = Modifier,
     onForgot: () -> Unit = {},
-    onSignUp: () -> Unit = {},
 ) {
     val state = rememberLoginState()
     val scrollState = rememberScrollState()
+    val authApplicationState by authViewModel.authApplicationState.collectAsStateWithLifecycle()
+    val submitting = authApplicationState is ApplicationState.Loading
 
     Box(
         modifier =
@@ -108,7 +111,7 @@ fun LoginScreen(
                             keyboardActions =
                                 KeyboardActions(
                                     onDone = {
-                                        if (state.canProceed) {
+                                        if (state.canProceed && !submitting) {
                                             authViewModel.loginToServer(
                                                 email = state.email.trim(),
                                                 password = state.password,
@@ -137,7 +140,7 @@ fun LoginScreen(
 
                     Button(
                         onClick = {
-                            if (state.canProceed) {
+                            if (state.canProceed && !submitting) {
                                 authViewModel.loginToServer(
                                     email = state.email.trim(),
                                     password = state.password,
@@ -149,10 +152,10 @@ fun LoginScreen(
                                 .fillMaxWidth()
                                 .height(52.dp),
                         shape = RoundedCornerShape(12.dp),
-                        enabled = state.canProceed,
+                        enabled = state.canProceed && !submitting,
                     ) {
                         Text(
-                            text = "Sign In",
+                            text = if (submitting) "Signing In…" else "Sign In",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         )
                     }
@@ -161,23 +164,12 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Don't have an account?",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = onSignUp) {
-                    Text(
-                        text = "Sign up",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
+            Text(
+                text = "No account yet? Admin accounts are created by your business owner — ask them for an invite.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

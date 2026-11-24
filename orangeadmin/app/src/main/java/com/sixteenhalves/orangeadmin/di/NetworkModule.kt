@@ -3,6 +3,8 @@ package com.sixteenhalves.orangeadmin.di
 import com.sixteenhalves.orangeadmin.ntwk.AuthAuthenticator
 import com.sixteenhalves.orangeadmin.ntwk.AuthInterceptor
 import com.sixteenhalves.orangeadmin.ntwk.NetworkService
+import com.sixteenhalves.orangeadmin.repository.AdminRepository
+import com.sixteenhalves.orangeadmin.repository.AdminRepositoryImpl
 import com.sixteenhalves.orangeadmin.repository.UserRepository
 import com.sixteenhalves.orangeadmin.repository.UserRepositoryImpl
 import dagger.Binds
@@ -41,7 +43,7 @@ class NetworkModule {
     fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit =
         Retrofit
             .Builder()
-            .baseUrl("https://api.example.com/")
+            .baseUrl("https://y4p.onrender.com/")
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -57,4 +59,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindUserRepository(userRepositoryImpl: UserRepositoryImpl): UserRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAdminRepository(adminRepositoryImpl: AdminRepositoryImpl): AdminRepository
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -28,6 +29,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,75 +39,50 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sixteenhalves.orangeadmin.R
+import com.sixteenhalves.orangeadmin.domain.Branch
+import com.sixteenhalves.orangeadmin.domain.BranchOverview
+import com.sixteenhalves.orangeadmin.domain.BranchStats
+import com.sixteenhalves.orangeadmin.domain.UiState
 import com.sixteenhalves.orangeadmin.utils.formatKes
-
-data class Branch(
-    val id: String,
-    val name: String,
-    val code: String,
-    val location: String,
-    val isActive: Boolean = true,
-)
-
-/**
- * Aggregates are served separately from the Branch entity (see API_CONTRACT.md §Admin & stats),
- * so mock data keeps them out of the synced record shape.
- */
-data class BranchStats(
-    val devicesCount: Int,
-    val todaySalesCents: Long,
-)
-
-object MockBranchData {
-    val branches =
-        listOf(
-            Branch("019a3c40-0001-7000-8000-000000000001", "Downtown Store", "NBO-CBD-01", "Kenyatta Ave, Nairobi"),
-            Branch("019a3c40-0002-7000-8000-000000000002", "Uptown Mall", "NBO-WST-02", "Waiyaki Way, Nairobi"),
-            Branch("019a3c40-0003-7000-8000-000000000003", "Mombasa Road Outlet", "MSA-RD-03", "Mombasa Rd, Nairobi"),
-            Branch("019a3c40-0004-7000-8000-000000000004", "Kisumu Pop-up", "KSM-CBD-04", "Oginga Odinga St, Kisumu", isActive = false),
-        )
-
-    val stats =
-        mapOf(
-            branches[0].id to BranchStats(devicesCount = 3, todaySalesCents = 425_080),
-            branches[1].id to BranchStats(devicesCount = 5, todaySalesCents = 812_050),
-            branches[2].id to BranchStats(devicesCount = 2, todaySalesCents = 234_000),
-            branches[3].id to BranchStats(devicesCount = 0, todaySalesCents = 85_000),
-        )
-}
+import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
 
 @Composable
 fun BranchesScreen(
+    mainViewModel: MainViewModel,
     onNewBranch: () -> Unit,
     onBranchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    canManage: Boolean = true,
 ) {
-    val branches = MockBranchData.branches
-    // variables: MockBranchData; Branches { branchname, location, salestoday, active, posdevices, totalstock, lowstock, topsellerWithQuantity, leastsoldWithQuantity, POSDEVICE)
-    // BRANCH (DATA_CONTRACT.md): {id: UUID, name: "", code: "", location: "", is_active: Bool}
-    // Stats (devicesCount / todaySales) come from a separate stats endpoint, not the entity.
-    // POSDEVICE: {deviceName: "", serialNumber: "", status: Bool}
+    val state by mainViewModel.branches.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        mainViewModel.refreshBranches()
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.surface,
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onNewBranch,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(16.dp),
-                icon = {
-                    Icon(
-                        painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
-                        contentDescription = null,
-                    )
-                },
-                text = {
-                    Text("Add Branch", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
-                }
-            )
+            if (canManage) {
+                ExtendedFloatingActionButton(
+                    onClick = onNewBranch,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(16.dp),
+                    icon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.baseline_add_circle_outline_24),
+                            contentDescription = null,
+                        )
+                    },
+                    text = {
+                        Text("Add Branch", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                    }
+                )
+            }
         },
     ) { innerPadding ->
         LazyColumn(
@@ -131,16 +109,41 @@ fun BranchesScreen(
                 }
             }
 
-            if (branches.isEmpty()) {
-                item {
-                    EmptyBranchesState(onNewBranch = onNewBranch)
+            when (val current = state) {
+                is UiState.Loading -> {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
                 }
-            } else {
-                items(branches) { branch ->
-                    BranchCard(
-                        branch = branch,
-                        onClick = { onBranchClick(branch.id) },
-                    )
+
+                is UiState.Failed -> {
+                    item {
+                        BranchesErrorState(
+                            message = current.message,
+                            onRetry = { mainViewModel.refreshBranches() },
+                        )
+                    }
+                }
+
+                is UiState.Empty -> {
+                    item {
+                        EmptyBranchesState(onNewBranch = onNewBranch, canManage = canManage)
+                    }
+                }
+
+                is UiState.Ready -> {
+                    items(current.value) { overview ->
+                        BranchCard(
+                            branch = overview.branch,
+                            stats = overview.stats,
+                            onClick = { onBranchClick(overview.branch.id) },
+                        )
+                    }
                 }
             }
         }
@@ -150,6 +153,7 @@ fun BranchesScreen(
 @Composable
 private fun BranchCard(
     branch: Branch,
+    stats: BranchStats,
     onClick: () -> Unit,
 ) {
     Card(
@@ -201,7 +205,7 @@ private fun BranchCard(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = branch.location,
+                            text = branch.location.ifBlank { branch.code },
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -228,11 +232,11 @@ private fun BranchCard(
             ) {
                 BranchMetric(
                     label = "Today's Sales",
-                    value = formatKes(MockBranchData.stats[branch.id]?.todaySalesCents ?: 0L),
+                    value = formatKes(stats.todaySalesCents),
                 )
                 BranchMetric(
                     label = "POS Devices",
-                    value = "${MockBranchData.stats[branch.id]?.devicesCount ?: 0} Active",
+                    value = "${stats.devicesCount} Active",
                     alignment = Alignment.End,
                 )
             }
@@ -283,7 +287,42 @@ private fun StatusBadge(isActive: Boolean) {
 }
 
 @Composable
-private fun EmptyBranchesState(onNewBranch: () -> Unit) {
+private fun BranchesErrorState(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(onClick = onRetry, shape = RoundedCornerShape(12.dp)) {
+                Text("Try again")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyBranchesState(
+    onNewBranch: () -> Unit,
+    canManage: Boolean,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -317,12 +356,21 @@ private fun EmptyBranchesState(onNewBranch: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(32.dp))
-            Button(
-                onClick = onNewBranch,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.height(48.dp)
-            ) {
-                Text("Create New Branch", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+            if (canManage) {
+                Button(
+                    onClick = onNewBranch,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Create New Branch", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                }
+            } else {
+                Text(
+                    text = "Ask an owner to create a branch.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }

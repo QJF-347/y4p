@@ -139,7 +139,7 @@ class CreateAccountState {
         get() = name.trim().length >= 4
 
     val isEmailValid: Boolean
-        get() = Patterns.EMAIL_ADDRESS.matcher(email).matches()
+        get() = Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
 
     val isPasswordValid: Boolean
         get() = password.length >= 8

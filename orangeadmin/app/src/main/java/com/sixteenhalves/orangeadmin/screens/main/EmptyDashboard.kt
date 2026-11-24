@@ -26,10 +26,14 @@ import androidx.compose.ui.unit.dp
 import com.sixteenhalves.orangeadmin.R
 
 @Composable
-fun EmptyDashboard(onNewBranch: () -> Unit) {
+fun EmptyDashboard(
+    onNewBranch: () -> Unit,
+    modifier: Modifier = Modifier,
+    canManage: Boolean = true,
+) {
     Column(
         modifier =
-            Modifier
+            modifier
                 .fillMaxSize()
                 .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -76,21 +80,30 @@ fun EmptyDashboard(onNewBranch: () -> Unit) {
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Button(
-            onClick = { onNewBranch() },
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
+        if (canManage) {
+            Button(
+                onClick = { onNewBranch() },
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.baseline_storefront_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Create First Branch")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_storefront_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Create First Branch")
+                }
             }
+        } else {
+            Text(
+                text = "Ask an owner to create the first branch.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

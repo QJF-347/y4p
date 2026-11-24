@@ -28,6 +28,7 @@ import com.sixteenhalves.orangeadmin.R
 fun EmptyInventory(
     onNewBranch: () -> Unit,
     modifier: Modifier = Modifier,
+    canManage: Boolean = true,
 ) {
     Column(
         modifier =
@@ -83,10 +84,19 @@ fun EmptyInventory(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Button(
-                onClick = { onNewBranch() },
-            ) {
-                Text("Create new Branch and add Items")
+            if (canManage) {
+                Button(
+                    onClick = { onNewBranch() },
+                ) {
+                    Text("Create new Branch and add Items")
+                }
+            } else {
+                Text(
+                    text = "Ask an owner to create a branch and add items.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
