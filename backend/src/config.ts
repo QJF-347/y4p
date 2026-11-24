@@ -18,7 +18,7 @@ const Env = z.object({
   DARAJA_SHORTCODE: z.string().default("174379"),
   DARAJA_PASSKEY: z.string().default(""),
   DARAJA_BASE_URL: z.string().default("https://sandbox.safaricom.co.ke"),
-  DARAJA_CALLBACK_URL: z.string().default("http://localhost:8080/api/v1/payments/daraja/callback"),
+  DARAJA_CALLBACK_URL: z.string().default("https://y4p.onrender.com/api/v1/payments/daraja/callback"),
   DARAJA_CALLBACK_SECRET: z.string().default("dev-callback-secret"),
   // For tests / local demos: skip the network call and accept every STK push.
   DARAJA_FAKE: z

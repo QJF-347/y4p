@@ -21,7 +21,7 @@ function decodeCursor(raw) {
 }
 export function registerReconciliationRoutes(app, deps, guards) {
     const { db } = deps;
-    app.get("/reconciliation", async (req) => {
+    app.get("/reconciliation/payments", async (req) => {
         await guards.requireOwner(req);
         const q = listQuery.extend({ cursor: z.string().optional() }).parse(req.query ?? {});
         const params = [];
@@ -63,7 +63,7 @@ export function registerReconciliationRoutes(app, deps, guards) {
             next_cursor: more ? encodeCursor(items[items.length - 1]) : null,
         };
     });
-    app.post("/reconciliation/:id/resolve", async (req) => {
+    app.post("/reconciliation/payments/:id/resolve", async (req) => {
         const claims = await guards.requireOwner(req);
         const id = uuid.parse(req.params.id);
         const body = parse(resolveBody, req.body);

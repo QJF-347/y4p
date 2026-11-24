@@ -5,10 +5,16 @@ import { conflict, forbidden, notFound, tooManyRequests, unauthorized, unprocess
 import { newId } from "../lib/ids.js";
 import { toIso } from "../lib/time.js";
 const uuid = z.string().uuid();
+/** API_CONTRACT §5: accept 07XX…, 2547XX…, +2547XX… and store E.164. */
+function normalizeMsisdn(raw) {
+    const digits = raw.replace(/[\s()-]/g, "");
+    const match = /^(?:\+?254|0)([17]\d{8})$/.exec(digits);
+    return match ? `+254${match[1]}` : null;
+}
 const stkPushBody = z.object({
     sale_id: uuid,
-    /** E.164, e.g. +254712345678. */
-    phone_number: z.string().regex(/^\+[1-9]\d{7,14}$/, "phone_number must be E.164"),
+    /** Accepted as 07XX…, 2547XX…, +2547XX…; normalized to E.164 before use. */
+    phone_number: z.string().trim().min(9).max(20),
     /** Optional guard: when sent it must equal the sale total. */
     amount_cents: z.number().int().min(1).optional(),
 });
@@ -115,18 +121,24 @@ export function registerPaymentRoutes(app, deps, guards) {
                 retry_after_ms: 60_000,
             });
         }
+        const phone = normalizeMsisdn(body.phone_number);
+        if (!phone) {
+            throw unprocessable("INVALID_MSISDN", "phone_number must be a Kenyan mobile number", {
+                accepted_formats: ["07XXXXXXXX", "2547XXXXXXXX", "+2547XXXXXXXX"],
+            });
+        }
         const amountKes = Math.round(Number(sale.total_amount_cents) / 100);
         const result = await deps.daraja.stkPush({
-            phone: body.phone_number,
+            phone,
             amountKes,
             accountReference: sale.receipt_number,
-            transactionDesc: "Orange POS",
+            transactionDesc: `Orange POS ${sale.receipt_number}`,
         });
         const id = newId();
         try {
             await db.query(`INSERT INTO payment_transaction (id, sale_id, checkout_request_id, merchant_request_id,
                                          amount_cents, phone_number, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $7)`, [id, sale.id, result.checkoutRequestId, result.merchantRequestId, sale.total_amount_cents, body.phone_number, clock]);
+         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $7)`, [id, sale.id, result.checkoutRequestId, result.merchantRequestId, sale.total_amount_cents, phone, clock]);
         }
         catch (err) {
             if (err.constraint === "pt_one_pending_per_sale") {
@@ -151,7 +163,7 @@ export function registerPaymentRoutes(app, deps, guards) {
             merchant_request_id: result.merchantRequestId,
             status: "PENDING",
             amount_cents: Number(sale.total_amount_cents),
-            phone_number: body.phone_number,
+            phone_number: phone,
             customer_message: result.customerMessage,
             expires_at: new Date(clock.getTime() + config.STK_TIMEOUT_MINUTES * 60_000).toISOString(),
             poll_after_ms: 2_000,
@@ -198,7 +210,8 @@ export function registerPaymentRoutes(app, deps, guards) {
                         // automatically — a human must decide (API_CONTRACT §4.4).
                         await q.query(`INSERT INTO reconciliation_queue
                  (id, payment_transaction_id, checkout_request_id, mpesa_receipt_number, raw_payload_ref)
-               VALUES ($1, $2, $3, $4, $5)`, [newId(), pt.id, cb.CheckoutRequestID, receipt, payloadRef]);
+               VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (payment_transaction_id) DO NOTHING`, [newId(), pt.id, cb.CheckoutRequestID, receipt, payloadRef]);
                     }
                     return;
                 }
@@ -212,16 +225,23 @@ export function registerPaymentRoutes(app, deps, guards) {
                     // A success without a receipt cannot be applied; flag it.
                     await q.query(`INSERT INTO reconciliation_queue
                (id, payment_transaction_id, checkout_request_id, mpesa_receipt_number, raw_payload_ref)
-             VALUES ($1, $2, $3, NULL, $4)`, [newId(), pt.id, cb.CheckoutRequestID, payloadRef]);
+             VALUES ($1, $2, $3, NULL, $4)
+             ON CONFLICT (payment_transaction_id) DO NOTHING`, [newId(), pt.id, cb.CheckoutRequestID, payloadRef]);
                     return;
                 }
+                // The receipt unique index can fire here; a savepoint keeps the outer
+                // transaction usable so the failure can be recorded in the same tx.
+                await q.query(`SAVEPOINT claim_receipt`);
                 try {
                     await q.query(`UPDATE payment_transaction SET status = 'SUCCESS', mpesa_receipt_number = $2,
                     result_code = $3, result_desc = $4, raw_payload_ref = $5, updated_at = now()
               WHERE id = $1`, [pt.id, receipt, cb.ResultCode, cb.ResultDesc ?? null, payloadRef]);
+                    await q.query(`RELEASE SAVEPOINT claim_receipt`);
                 }
                 catch (err) {
                     if (err.code === "23505") {
+                        await q.query(`ROLLBACK TO SAVEPOINT claim_receipt`);
+                        await q.query(`RELEASE SAVEPOINT claim_receipt`);
                         // Receipt already claimed by another transaction: a human must reconcile.
                         await q.query(`UPDATE payment_transaction SET status = 'FAILED',
                       result_desc = 'RECEIPT_ALREADY_CLAIMED', raw_payload_ref = $2, updated_at = now()
@@ -229,7 +249,8 @@ export function registerPaymentRoutes(app, deps, guards) {
                         await setSalePayment(q, pt.sale_id, "FAILED", null);
                         await q.query(`INSERT INTO reconciliation_queue
                  (id, payment_transaction_id, checkout_request_id, mpesa_receipt_number, raw_payload_ref)
-               VALUES ($1, $2, $3, $4, $5)`, [newId(), pt.id, cb.CheckoutRequestID, receipt, payloadRef]);
+               VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (payment_transaction_id) DO NOTHING`, [newId(), pt.id, cb.CheckoutRequestID, receipt, payloadRef]);
                         return;
                     }
                     throw err;
@@ -261,14 +282,17 @@ export function registerPaymentRoutes(app, deps, guards) {
             pt.created_at.getTime() + config.STK_TIMEOUT_MINUTES * 60_000 <= deps.clock().getTime();
         return {
             payment_transaction_id: pt.id,
-            sale_id: pt.sale_id,
             status: pt.status,
             amount_cents: Number(pt.amount_cents),
             phone_number: pt.phone_number,
-            mpesa_receipt: pt.mpesa_receipt_number ?? pt.sale_receipt,
+            mpesa_receipt_number: pt.mpesa_receipt_number ?? pt.sale_receipt,
             result_code: pt.result_code,
             result_desc: pt.result_desc,
-            sale_payment_status: pt.payment_status,
+            sale: {
+                id: pt.sale_id,
+                payment_status: pt.payment_status,
+                mpesa_receipt: pt.sale_receipt,
+            },
             created_at: toIso(pt.created_at),
             expires_at: toIso(new Date(pt.created_at.getTime() + config.STK_TIMEOUT_MINUTES * 60_000)),
             timed_out: expired,

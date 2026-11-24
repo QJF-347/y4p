@@ -4,6 +4,7 @@ import { writeAudit } from "../lib/audit.js";
 import { badRequest, conflict, forbidden, notFound, unprocessable } from "../lib/errors.js";
 import { newDeviceCode, newId, newOpaqueToken, sha256Hex } from "../lib/ids.js";
 import { addSeconds, parseTimestamp, toIso } from "../lib/time.js";
+import { LOW_STOCK_THRESHOLD } from "./stats.js";
 const uuid = z.string().uuid();
 const isoDate = z.string().min(10).max(40);
 const branchCreate = z.object({
@@ -627,6 +628,25 @@ export function registerCatalogRoutes(app, deps, guards) {
             ip: req.ip,
         });
         reply.status(204).send();
+    });
+    // ----------------------------------------------------------- device ops
+    const heartbeatBody = z.object({
+        app_version: z.string().trim().max(40).optional(),
+        outbox_pending: z.number().int().min(0).default(0),
+    });
+    app.post("/devices/heartbeat", async (req) => {
+        const device = await guards.requireDevice(req);
+        const body = parse(heartbeatBody, req.body ?? {});
+        await db.query(`UPDATE device SET last_seen_at = now(), app_version = COALESCE($2, app_version) WHERE id = $1`, [device.id, body.app_version ?? null]);
+        return {
+            server_time: deps.clock().toISOString(),
+            config: {
+                stk_timeout_minutes: deps.config.STK_TIMEOUT_MINUTES,
+                low_stock_threshold: LOW_STOCK_THRESHOLD,
+                sync_push_max_records: 200,
+                sync_pull_page_size: 1000,
+            },
+        };
     });
     // ----------------------------------------------------------- sales read
     app.get("/branches/:id/sales", async (req) => {

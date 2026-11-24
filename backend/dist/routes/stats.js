@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { forbidden, notFound } from "../lib/errors.js";
 /** Matches the admin app's "low stock" badge threshold. */
-const LOW_STOCK_THRESHOLD = 5;
+export const LOW_STOCK_THRESHOLD = 5;
 const uuid = z.string().uuid();
 function scopeBranch(claims, branchId) {
     if (claims.role === "OWNER")

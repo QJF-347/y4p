@@ -20,8 +20,10 @@ function endpointOf(req) {
 function requestHashOf(req) {
     return sha256Hex(JSON.stringify({ body: req.body ?? null, query: req.query ?? null }));
 }
+/** Statuses that should not be cached: auth, conflicts, timeouts, rate limits. */
+const UNCACHEABLE = new Set([401, 408, 409, 422, 429]);
 export function registerIdempotency(app, deps) {
-    // Remember which requests were keyed so onSend knows to persist the outcome.
+    // Remember which requests were keyed so we can consult and persist their outcome.
     const keyed = new WeakMap();
     // preValidation runs after body parsing, so the request hash can include the body.
     app.addHook("preValidation", async (req, reply) => {
@@ -50,28 +52,33 @@ export function registerIdempotency(app, deps) {
         reply.header("idempotent-replay", "true").status(stored.status_code).send(stored.response);
         return reply;
     });
-    app.addHook("onSend", async (req, reply, payload) => {
+    // Stash the outcome here, then persist it in onResponse. These hooks must stay
+    // synchronous: awaiting inside the send lifecycle keeps `reply.sent` false, and
+    // an async handler that already called reply.send() then resolves to undefined,
+    // which makes Fastify send a second (empty) response.
+    app.addHook("preSerialization", (req, reply, payload, done) => {
         const ctx = keyed.get(req);
-        if (!ctx)
-            return payload;
         // Don't cache server errors or transient outcomes; the client should retry.
-        if (reply.statusCode >= 500 || [401, 408, 409, 429].includes(reply.statusCode))
-            return payload;
-        if (typeof payload !== "string" || payload.length === 0)
-            return payload;
-        let parsed;
-        try {
-            parsed = JSON.parse(payload);
+        if (ctx &&
+            reply.statusCode < 500 &&
+            !UNCACHEABLE.has(reply.statusCode) &&
+            typeof payload === "object" &&
+            payload !== null) {
+            ctx.cache = { statusCode: reply.statusCode, payload };
         }
-        catch {
-            return payload;
-        }
-        await deps.db
+        // Sync hooks advance the pipeline through the callback, not a return value.
+        done(null, payload);
+    });
+    app.addHook("onResponse", (req) => {
+        const ctx = keyed.get(req);
+        if (!ctx?.cache)
+            return;
+        // The response is already sent; a failed cache write should not surface.
+        void deps.db
             .query(`INSERT INTO idempotency_key (key, actor_id, endpoint, request_hash, status_code, response)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (key, actor_id, endpoint) DO NOTHING`, [ctx.key, ctx.actor, ctx.endpoint, ctx.hash, reply.statusCode, JSON.stringify(parsed)])
+         ON CONFLICT (key, actor_id, endpoint) DO NOTHING`, [ctx.key, ctx.actor, ctx.endpoint, ctx.hash, ctx.cache.statusCode, JSON.stringify(ctx.cache.payload)])
             .catch(() => undefined);
-        return payload;
     });
 }
 //# sourceMappingURL=idempotency.js.map

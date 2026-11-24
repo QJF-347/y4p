@@ -89,6 +89,14 @@ export async function buildApp(deps, opts = {}) {
             reply.status(err.statusCode).send(errorBody(err));
             return;
         }
+        // Raw schema.parse() calls in routes (params/query) bypass parse(); keep
+        // them on the 400 envelope instead of falling through to 500.
+        if (err instanceof ZodError) {
+            reply.status(400).send(errorBody(badRequest("VALIDATION_ERROR", "Request failed validation", {
+                issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+            })));
+            return;
+        }
         const maybeStatus = err.statusCode;
         const message = err instanceof Error ? err.message : "Bad request";
         if (typeof maybeStatus === "number" && maybeStatus >= 400 && maybeStatus < 500) {
