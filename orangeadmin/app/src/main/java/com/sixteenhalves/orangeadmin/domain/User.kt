@@ -8,6 +8,8 @@ data class User(
     val email: String? = null,
     val role: String? = null,
     @SerializedName("branch_ids") val branchIds: List<String>? = null,
+    // Display-only: the v1 backend does not store avatars or expose a profile-update endpoint.
+    val avatar: String? = null,
 )
 
 /** OWNER accounts can mutate; MANAGER accounts are read-only in the admin app. */

@@ -204,7 +204,8 @@ fun EntryProviderScope<AppRoute>.mainGraph(
                 onNavigateBiometrics = { backStack.add(SettingsRoutes.Biometrics) },
                 onNavigateNotifications = { backStack.add(SettingsRoutes.Notifications) },
                 onNavigateAppDetails = { backStack.add(SettingsRoutes.AppDetails) },
-                onNavigateAccountDetails = { backStack.add(SettingsRoutes.Account)}
+                onNavigateAccountDetails = { backStack.add(SettingsRoutes.Account)},
+                mainViewModel = mainViewModel,
             )
         }
     }

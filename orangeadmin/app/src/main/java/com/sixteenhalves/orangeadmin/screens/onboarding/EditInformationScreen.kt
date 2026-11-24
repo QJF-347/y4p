@@ -29,6 +29,8 @@ import com.sixteenhalves.orangeadmin.viewmodels.AuthRegisterFlowData
 import com.sixteenhalves.orangeadmin.viewmodels.AuthViewModel
 
 class EditInformationState(initialData: AuthRegisterFlowData) {
+    val isPasswordEditable: Boolean = initialData.password.isEmpty()
+
     var name by mutableStateOf(initialData.name)
     var email by mutableStateOf(initialData.email)
     var password by mutableStateOf(initialData.password)
@@ -43,10 +45,10 @@ class EditInformationState(initialData: AuthRegisterFlowData) {
         get() = Patterns.EMAIL_ADDRESS.matcher(email).matches()
 
     val isPasswordValid: Boolean
-        get() = password.length >= 8
+        get() = !isPasswordEditable || password.length >= 8
 
     val doPasswordsMatch: Boolean
-        get() = password == confirmPassword && confirmPassword.isNotEmpty()
+        get() = !isPasswordEditable || (password == confirmPassword && confirmPassword.isNotEmpty())
 
     val canProceed: Boolean
         get() = isNameValid && isEmailValid && isPasswordValid && doPasswordsMatch
@@ -58,10 +60,10 @@ class EditInformationState(initialData: AuthRegisterFlowData) {
         get() = if (email.isNotEmpty() && !isEmailValid) "Enter a valid email address." else null
 
     val passwordError: String?
-        get() = if (password.isNotEmpty() && !isPasswordValid) "Password should be at least 8 characters." else null
+        get() = if (isPasswordEditable && password.isNotEmpty() && !isPasswordValid) "Password should be at least 8 characters." else null
 
     val confirmPasswordError: String?
-        get() = if (confirmPassword.isNotEmpty() && !doPasswordsMatch) "Passwords do not match." else null
+        get() = if (isPasswordEditable && confirmPassword.isNotEmpty() && !doPasswordsMatch) "Passwords do not match." else null
 }
 
 @Composable
@@ -141,14 +143,21 @@ fun EditInformationScreen(
             )
             SharedTextField(
                 value = editState.password,
-                onValueChange = { editState.password = it },
+                onValueChange = { if (editState.isPasswordEditable) editState.password = it },
                 placeHolderText = "Password",
-                isPassword = true
+                isPassword = true,
+                enabled = editState.isPasswordEditable
             )
-            if (editState.passwordError != null) {
+            if (editState.isPasswordEditable && editState.passwordError != null) {
                 Text(
                     text = editState.passwordError!!,
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (!editState.isPasswordEditable) {
+                Text(
+                    text = "Password cannot be changed here.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -162,11 +171,12 @@ fun EditInformationScreen(
             )
             SharedTextField(
                 value = editState.confirmPassword,
-                onValueChange = { editState.confirmPassword = it },
+                onValueChange = { if (editState.isPasswordEditable) editState.confirmPassword = it },
                 placeHolderText = "Confirm Password",
-                isPassword = true
+                isPassword = true,
+                enabled = editState.isPasswordEditable
             )
-            if (editState.confirmPasswordError != null) {
+            if (editState.isPasswordEditable && editState.confirmPasswordError != null) {
                 Text(
                     text = editState.confirmPasswordError!!,
                     color = MaterialTheme.colorScheme.error,
@@ -208,7 +218,9 @@ fun EditInformationScreen(
             onClick = {
                 authViewModel.updateName(editState.name.trim())
                 authViewModel.updateEmail(editState.email.trim())
-                authViewModel.updatePassword(editState.password)
+                if (editState.isPasswordEditable) {
+                    authViewModel.updatePassword(editState.password)
+                }
                 authViewModel.updateCompanyName(editState.companyName.trim())
                 authViewModel.updateCompanyDesc(editState.companyDesc.trim())
                 onBack()

@@ -26,6 +26,7 @@ fun SharedTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     singleLine: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val passwordVisible = remember { mutableStateOf(false) }
     val visualTransformation: VisualTransformation =
@@ -35,6 +36,7 @@ fun SharedTextField(
         value = value,
         onValueChange = { text: String -> onValueChange(text) },
         modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
         label = label?.let { { Text(it) } },
         placeholder = placeHolderText?.let { { Text(it) } },
         singleLine = singleLine,

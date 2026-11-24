@@ -26,13 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-
 import kotlin.time.Duration.Companion.milliseconds
 
 private val DefaultLoadingStatements =
@@ -65,55 +63,51 @@ fun LoadingSpinner(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        // Full screen blur background
+        // Professional semi-transparent scrim background
         Box(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .blur(16.dp)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)),
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)),
         )
 
-        // Simplified full-screen loading content
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        // Polished Material 3 Card Loader Container
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
             modifier = Modifier.padding(32.dp),
         ) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 4.dp,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = 32.dp, vertical = 28.dp),
             ) {
-                Box(
-                    modifier = Modifier.padding(20.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(40.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 4.dp,
-                        strokeCap = StrokeCap.Round,
-                    )
-                }
-            }
+                CircularProgressIndicator(
+                    modifier = Modifier.size(44.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                    strokeWidth = 4.dp,
+                    strokeCap = StrokeCap.Round,
+                )
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-            AnimatedContent(
-                targetState = currentText,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
-                label = "loading_statement_transition",
-            ) { text ->
-                Text(
-                    text = text,
-                    style =
-                        MaterialTheme.typography.bodyMedium.copy(
+                AnimatedContent(
+                    targetState = currentText,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "loading_statement_transition",
+                ) { text ->
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyLarge.copy(
                             fontWeight = FontWeight.Medium,
                         ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }
