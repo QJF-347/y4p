@@ -41,6 +41,7 @@ fun SettingsScreen(
     onNavigateTheme: () -> Unit,
     onNavigateBiometrics: () -> Unit,
     onNavigateNotifications: () -> Unit,
+    onNavigatePaymentSettings: () -> Unit,
     onNavigateAppDetails: () -> Unit,
     onNavigateAccountDetails: () -> Unit,
     mainViewModel: MainViewModel,
@@ -96,6 +97,13 @@ fun SettingsScreen(
                     title = "Notifications",
                     subtitle = "Allow Notifications for important Store events",
                     onClick = onNavigateNotifications,
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                SettingsListItem(
+                    iconResId = R.drawable.baseline_storefront_24,
+                    title = "Payment Settings",
+                    subtitle = "M-Pesa / Daraja details (stored on this device)",
+                    onClick = onNavigatePaymentSettings,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
                 SettingsListItem(

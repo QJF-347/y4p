@@ -520,6 +520,17 @@ private fun DevicesSection(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            val seen = lastSeenState(device.lastSeenAt)
+                            Text(
+                                text = seen.label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color =
+                                    if (seen.stale) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                            )
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
@@ -733,4 +744,23 @@ fun InsightCard(
             }
         }
     }
+}
+
+/** A device silent for more than a day is flagged so a dead till is visible. */
+private data class LastSeenState(val label: String, val stale: Boolean)
+
+private fun lastSeenState(iso: String?): LastSeenState {
+    val seen =
+        iso?.let { value ->
+            runCatching { java.time.OffsetDateTime.parse(value).toInstant() }.getOrNull()
+        } ?: return LastSeenState("Never synced", stale = true)
+    val minutes = java.time.Duration.between(seen, java.time.Instant.now()).toMinutes().coerceAtLeast(0)
+    val label =
+        when {
+            minutes < 1 -> "Seen just now"
+            minutes < 60 -> "Seen ${minutes}m ago"
+            minutes < 24 * 60 -> "Seen ${minutes / 60}h ago"
+            else -> "Seen ${minutes / (24 * 60)}d ago"
+        }
+    return LastSeenState(label, stale = minutes >= 24 * 60)
 }

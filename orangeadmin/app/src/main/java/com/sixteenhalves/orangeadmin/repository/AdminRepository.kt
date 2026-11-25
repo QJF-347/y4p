@@ -1,6 +1,7 @@
 package com.sixteenhalves.orangeadmin.repository
 
 import com.sixteenhalves.orangeadmin.domain.Branch
+import com.sixteenhalves.orangeadmin.domain.BranchComparisonRow
 import com.sixteenhalves.orangeadmin.domain.BranchDetail
 import com.sixteenhalves.orangeadmin.domain.BranchOverview
 import com.sixteenhalves.orangeadmin.domain.BranchStats
@@ -8,7 +9,10 @@ import com.sixteenhalves.orangeadmin.domain.CategoryOption
 import com.sixteenhalves.orangeadmin.domain.DashboardSummary
 import com.sixteenhalves.orangeadmin.domain.DeviceInfo
 import com.sixteenhalves.orangeadmin.domain.InventoryProduct
+import com.sixteenhalves.orangeadmin.domain.SalesTrend
+import com.sixteenhalves.orangeadmin.domain.SalesTrendPoint
 import com.sixteenhalves.orangeadmin.domain.TopSeller
+import com.sixteenhalves.orangeadmin.ntwk.BranchComparisonDto
 import com.sixteenhalves.orangeadmin.ntwk.BranchDto
 import com.sixteenhalves.orangeadmin.ntwk.BranchStatsDto
 import com.sixteenhalves.orangeadmin.ntwk.CreateBranchRequest
@@ -20,6 +24,7 @@ import com.sixteenhalves.orangeadmin.ntwk.DeviceDto
 import com.sixteenhalves.orangeadmin.ntwk.NetworkService
 import com.sixteenhalves.orangeadmin.ntwk.ProductDto
 import com.sixteenhalves.orangeadmin.ntwk.RestockRequest
+import com.sixteenhalves.orangeadmin.ntwk.SalesTrendDto
 import com.sixteenhalves.orangeadmin.ntwk.toUserMessage
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -55,6 +60,15 @@ interface AdminRepository {
     suspend fun getBranchDetail(branchId: String): Result<BranchDetail>
 
     suspend fun getCategories(branchId: String): Result<List<CategoryOption>>
+
+    /** Daily paid-sales totals for one branch over the last [days] UTC days. */
+    suspend fun getSalesTrend(
+        branchId: String,
+        days: Int,
+    ): Result<SalesTrend>
+
+    /** Revenue, sale count, low stock and live devices for every visible branch. */
+    suspend fun getBranchComparison(days: Int): Result<List<BranchComparisonRow>>
 
     suspend fun createBranch(
         name: String,
@@ -263,6 +277,15 @@ class AdminRepositoryImpl
                 }
             }
 
+        override suspend fun getSalesTrend(
+            branchId: String,
+            days: Int,
+        ): Result<SalesTrend> =
+            apiCall { networkService.getSalesTrend(branchId, days) }.map { it.toSalesTrend() }
+
+        override suspend fun getBranchComparison(days: Int): Result<List<BranchComparisonRow>> =
+            apiCall { networkService.getBranchComparison(days) }.map { it.toBranchComparison() }
+
         override suspend fun createBranch(
             name: String,
             location: String,
@@ -428,6 +451,33 @@ class AdminRepositoryImpl
                 isActive = isActive ?: true,
             )
 
+        private fun SalesTrendDto.toSalesTrend(): SalesTrend =
+            SalesTrend(
+                branchId = branchId.orEmpty(),
+                branchName = branchName.orEmpty(),
+                days = days ?: points?.size ?: 0,
+                points =
+                    points.orEmpty().map { point ->
+                        SalesTrendPoint(
+                            date = point.date.orEmpty(),
+                            salesTotalCents = point.salesTotalCents ?: 0,
+                            salesCount = point.salesCount ?: 0,
+                        )
+                    },
+            )
+
+        private fun BranchComparisonDto.toBranchComparison(): List<BranchComparisonRow> =
+            branches.orEmpty().map { row ->
+                BranchComparisonRow(
+                    branchId = row.branchId.orEmpty(),
+                    name = row.name.orEmpty(),
+                    salesTotalCents = row.salesTotalCents ?: 0,
+                    salesCount = row.salesCount ?: 0,
+                    lowStockItems = row.lowStockItems ?: 0,
+                    devicesCount = row.devicesCount ?: 0,
+                )
+            }
+
         private fun BranchStatsDto.toBranchStats(): BranchStats =
             BranchStats(
                 devicesCount = devicesCount ?: 0,
@@ -469,6 +519,8 @@ class AdminRepositoryImpl
                 name = name.orEmpty(),
                 code = deviceCode.orEmpty(),
                 isRevoked = isRevoked ?: false,
+                lastSeenAt = lastSeenAt,
+                appVersion = appVersion,
             )
 
         private companion object {

@@ -124,6 +124,33 @@ describe("sync", () => {
 
     const { rows } = await pool.query<{ name: string }>(`SELECT name FROM product WHERE id = $1`, [fresh.id]);
     assert.equal(rows[0]!.name, "Fresh");
+
+    // The dropped write is recorded rather than silently discarded.
+    const audit = await pool.query<{ action: string; entity_id: string }>(
+      `SELECT action, entity_id FROM audit_log WHERE action = 'SYNC_STALE_WRITE'`,
+    );
+    assert.equal(audit.rows.length, 1);
+    assert.equal(audit.rows[0]!.entity_id, fresh.id);
+  });
+
+  it("rejects an updated_at more than five minutes in the future", async () => {
+    const { app, branchId, device } = await setup();
+    const ahead = productPayload(branchId, {
+      created_at: iso(60 * 60_000),
+      updated_at: iso(30 * 60_000),
+    });
+    const push = await pushBatch(app, device.deviceToken, {
+      device_id: device.deviceId,
+      branch_id: branchId,
+      products: [ahead],
+    });
+    assert.equal(push.statusCode, 200, push.body);
+    const row = findResult(push.json() as { results: Result[] }, "product", ahead.id);
+    assert.equal(row.status, "REJECTED");
+    assert.equal(row.code, "CLOCK_AHEAD");
+
+    const { rows } = await pool.query(`SELECT 1 FROM product WHERE id = $1`, [ahead.id]);
+    assert.equal(rows.length, 0);
   });
 
   it("applies a sale's stock delta exactly once", async () => {

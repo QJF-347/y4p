@@ -46,7 +46,7 @@ Devices are provisioned by an admin and get their own long-lived credential.
 | Endpoint | Body / Notes |
 |---|---|
 | `POST /branches/{branch_id}/devices` | (Admin) `{name}` → `{device_id, device_code (4 chars A–Z0–9), device_token, branch_id}`. `device_code` is embedded in receipt numbers and immutable for the device's lifetime. |
-| `POST /devices/heartbeat` | (Device) `{app_version, outbox_pending}` → `{server_time, config:{...}}` — also validates the token. |
+| `POST /devices/heartbeat` | (Device) `{app_version?, outbox_pending}` → `{server_time, config:{...}}` — validates the token and refreshes `last_seen_at`. The POS sends one per sync cycle (launch, every 60s, manual Sync). |
 | `DELETE /devices/{device_id}` | (Admin) revoke. Further device calls → 401 `DEVICE_REVOKED`. |
 | `DELETE /devices/{device_id}/permanent` | (Owner) delete an **already revoked** device row; active → 409 `DEVICE_ACTIVE`. Sales keep the plain-text `device_id`, so history is unaffected. |
 
@@ -84,7 +84,7 @@ All admin endpoints require Bearer JWT. All mutations write an audit-log row.
 | `PATCH /products/{pid}` | Update non-stock fields. **Stock is not writable here** → 409 `USE_RESTOCK_ENDPOINT` (audit). |
 | `POST /products/{pid}/restock` | `{stock_quantity, reason}` — absolute set + audit row (v2 movement ledger). |
 | `DELETE /products/{pid}` | Soft delete. |
-| `GET /branches/{id}/devices` | List devices with `{device_id, name, device_code, is_revoked, last_seen_at}`. |
+| `GET /branches/{id}/devices` | List devices with `{device_id, name, device_code, is_revoked, last_seen_at, app_version}`. `last_seen_at` is refreshed by `/devices/heartbeat` and every device request; orangeadmin flags >24h or missing as stale. |
 | `GET /branches/{id}/sales` | Read-only drill-down `?from=&to=&payment_status=&cursor=`. |
 
 ### Stats / dashboard (read-only aggregates — never mutate entity tables)
@@ -96,6 +96,20 @@ All admin endpoints require Bearer JWT. All mutations write an audit-log row.
 
 This is what feeds orangeadmin's `BranchStats` / dashboard — the Branch entity itself stays lean
 (`DATA_CONTRACT.md` §2.1).
+
+### BI reports (read-only aggregates)
+
+Both accept `?days=N` (`1..90`, default `7`) and cover whole UTC days ending today (`from`
+inclusive, `to` exclusive = tomorrow 00:00 UTC). Only `PAID` sales are counted. Days without
+sales are zero-filled so charts stay aligned.
+
+| Method & path | Response sketch |
+|---|---|
+| `GET /branches/{id}/reports/sales-trend?days=7` | `{branch_id, branch_name, days, from, to, points: [{date: "YYYY-MM-DD", sales_total_cents, sales_count}]}` — one point per day. Branch-scoped (§1.3). |
+| `GET /reports/branch-comparison?days=7` | `{days, from, to, branches: [{branch_id, name, sales_total_cents, sales_count, low_stock_items, devices_count}]}` — sorted by revenue desc, filtered to the caller's branches. `low_stock_items` uses the shared `stock_quantity <= 5` threshold; `devices_count` counts non-revoked devices. |
+
+orangeadmin renders these as a Canvas bar chart (Sales Trends) and proportional bars
+(Branch Comparison).
 
 ---
 

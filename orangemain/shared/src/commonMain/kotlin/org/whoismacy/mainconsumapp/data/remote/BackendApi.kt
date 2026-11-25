@@ -210,6 +210,16 @@ data class PaymentStatusResponse(
 )
 
 @Serializable
+private data class HeartbeatRequest(
+    @SerialName("outbox_pending") val outboxPending: Int,
+)
+
+@Serializable
+private data class HeartbeatResponse(
+    @SerialName("server_time") val serverTime: String? = null,
+)
+
+@Serializable
 data class PaymentSaleSummary(
     val id: String,
     @SerialName("payment_status") val paymentStatus: String,
@@ -259,6 +269,20 @@ class BackendApi(
             setBody(StkPushRequest(saleId = saleId, phoneNumber = phoneNumber))
         }
         return res.decode()
+    }
+
+    /**
+     * Reports liveness and the outbox depth so the admin's device register can
+     * flag a till that has stopped syncing. Only the call succeeding matters.
+     */
+    suspend fun heartbeat(outboxPending: Int) {
+        val s = configured()
+        val res = http.post("${s.root()}/api/v1/devices/heartbeat") {
+            header("x-device-token", s.deviceToken)
+            contentType(ContentType.Application.Json)
+            setBody(HeartbeatRequest(outboxPending))
+        }
+        if (res.status.value !in 200..299) res.decode<HeartbeatResponse>()
     }
 
     suspend fun paymentStatus(paymentTransactionId: String): PaymentStatusResponse {

@@ -270,8 +270,53 @@ async function applySale(
   return { versions, saleVersion, warnings, paymentStatus };
 }
 
+/** Five minutes of tolerance for device clock drift; beyond that LWW is unsafe. */
+const MAX_CLOCK_AHEAD_MS = 5 * 60 * 1000;
+
+/** A device clock running far ahead would otherwise win every LWW comparison forever. */
+function clockSkewError(iso: string, now: Date): { code: string; message: string } | null {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) {
+    return { code: "INVALID_TIMESTAMP", message: "updated_at is not a valid timestamp" };
+  }
+  if (at - now.getTime() > MAX_CLOCK_AHEAD_MS) {
+    return {
+      code: "CLOCK_AHEAD",
+      message: "updated_at is more than five minutes in the future; check the device clock",
+    };
+  }
+  return null;
+}
+
 export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Guards): void {
   const { db } = deps;
+
+  /**
+   * LWW drops a device write when the server already holds a newer row. That is
+   * correct, but it must not be invisible: record the rejected write in the
+   * audit log so a lost edit can be explained later (DATA_CONTRACT §6.4).
+   */
+  async function recordStaleWrite(
+    q: Queryable,
+    device: { id: string; code: string },
+    entity: "category" | "product",
+    id: string,
+    deviceUpdatedAt: string,
+    serverUpdatedAt: Date | null,
+  ): Promise<void> {
+    await writeAudit(q, {
+      actorType: "DEVICE",
+      actorId: device.id,
+      action: "SYNC_STALE_WRITE",
+      entity,
+      entityId: id,
+      details: {
+        device_code: device.code,
+        device_updated_at: deviceUpdatedAt,
+        server_updated_at: serverUpdatedAt ? serverUpdatedAt.toISOString() : null,
+      },
+    });
+  }
 
   app.post("/sync/push", async (req) => {
     const device = await guards.requireDevice(req);
@@ -295,6 +340,11 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
     await db.tx(async (q) => {
       // -------------------------------------------------------- categories
       for (const cat of body.categories) {
+        const skew = clockSkewError(cat.updated_at, clock);
+        if (skew) {
+          results.push({ entity: "category", id: cat.id, status: "REJECTED", code: skew.code, message: skew.message });
+          continue;
+        }
         if (cat.deleted_at) {
           const { rows } = await q.query<{ server_version: string }>(
             `UPDATE category SET deleted_at = $3, updated_at = $3, server_updated_at = now(),
@@ -307,6 +357,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
             versions.push(Number(rows[0].server_version));
             results.push({ entity: "category", id: cat.id, status: "SYNCED", server_version: Number(rows[0].server_version) });
           } else {
+            await recordStaleWrite(q, device, "category", cat.id, cat.deleted_at, null);
             results.push({ entity: "category", id: cat.id, status: "CONFLICT", code: "STALE_WRITE", message: "A newer version exists" });
           }
           continue;
@@ -316,6 +367,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
           [cat.id, device.branchId],
         );
         if (existing.rows[0] && existing.rows[0].updated_at > new Date(cat.updated_at)) {
+          await recordStaleWrite(q, device, "category", cat.id, cat.updated_at, existing.rows[0].updated_at);
           results.push({
             entity: "category",
             id: cat.id,
@@ -359,6 +411,11 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
 
       // ---------------------------------------------------------- products
       for (const prod of body.products) {
+        const skew = clockSkewError(prod.updated_at, clock);
+        if (skew) {
+          results.push({ entity: "product", id: prod.id, status: "REJECTED", code: skew.code, message: skew.message });
+          continue;
+        }
         if (prod.deleted_at) {
           const { rows } = await q.query<{ server_version: string }>(
             `UPDATE product SET deleted_at = $3, updated_at = $3, server_updated_at = now(),
@@ -371,6 +428,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
             versions.push(Number(rows[0].server_version));
             results.push({ entity: "product", id: prod.id, status: "SYNCED", server_version: Number(rows[0].server_version) });
           } else {
+            await recordStaleWrite(q, device, "product", prod.id, prod.deleted_at, null);
             results.push({ entity: "product", id: prod.id, status: "CONFLICT", code: "STALE_WRITE", message: "A newer version exists" });
           }
           continue;
@@ -381,6 +439,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
         );
         const prev = existing.rows[0];
         if (prev && prev.updated_at > new Date(prod.updated_at)) {
+          await recordStaleWrite(q, device, "product", prod.id, prod.updated_at, prev.updated_at);
           results.push({
             entity: "product",
             id: prod.id,
@@ -450,6 +509,8 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
             return rows[0];
           });
           if (!row) {
+            // Equal timestamps also land here; record the dropped write.
+            await recordStaleWrite(q, device, "product", prod.id, prod.updated_at, prev?.updated_at ?? null);
             results.push({ entity: "product", id: prod.id, status: "CONFLICT", code: "LAST_WRITE_WINS", message: "The server has a newer copy" });
             continue;
           }
@@ -562,6 +623,11 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
           });
           continue;
         }
+        const skew = clockSkewError(stone.deleted_at, clock);
+        if (skew) {
+          results.push({ entity: stone.entity, id: stone.id, status: "REJECTED", code: skew.code, message: skew.message });
+          continue;
+        }
         const table = stone.entity === "category" ? "category" : "product";
         const { rows } = await q.query<{ server_version: string }>(
           `UPDATE ${table}
@@ -575,6 +641,7 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
           versions.push(Number(rows[0].server_version));
           results.push({ entity: stone.entity, id: stone.id, status: "SYNCED", server_version: Number(rows[0].server_version) });
         } else {
+          await recordStaleWrite(q, device, stone.entity, stone.id, stone.deleted_at, null);
           results.push({ entity: stone.entity, id: stone.id, status: "CONFLICT", code: "STALE_WRITE", message: "A newer version exists" });
         }
       }

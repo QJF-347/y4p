@@ -37,6 +37,19 @@ function dayBounds(now: Date): { from: Date; to: Date } {
   return { from, to: new Date(from.getTime() + DAY_MS) };
 }
 
+const REPORT_WINDOW = z.object({ days: z.coerce.number().int().min(1).max(90).default(7) });
+
+/** Inclusive window of whole UTC days ending today. */
+function windowBounds(now: Date, days: number): { from: Date; to: Date } {
+  const today = dayBounds(now).from;
+  return { from: new Date(today.getTime() - (days - 1) * DAY_MS), to: new Date(today.getTime() + DAY_MS) };
+}
+
+/** The UTC calendar date a window bound falls on, e.g. "2026-11-25". */
+function isoDate(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
 async function branchToday(deps: Deps, branchId: string): Promise<Today> {
   const { from, to } = dayBounds(deps.clock());
   const { rows } = await deps.db.query<{
@@ -146,6 +159,106 @@ export function registerStatsRoutes(app: FastifyInstance, deps: Deps, guards: Gu
       sales_today_count: Number(r.sales_today_count),
       pending_payments: Number(r.pending_payments),
       low_stock_items: Number(r.low_stock_items),
+    };
+  });
+
+  // Daily paid-sales totals for one branch, zero-filled for days with no sales.
+  app.get("/branches/:id/reports/sales-trend", async (req) => {
+    const claims = await guards.requireAdmin(req);
+    const branchId = uuid.parse((req.params as { id: string }).id);
+    scopeBranch(claims, branchId);
+    const { days } = REPORT_WINDOW.parse(req.query);
+
+    const branch = await db.query<{ name: string }>(
+      `SELECT name FROM branch WHERE id = $1 AND deleted_at IS NULL`,
+      [branchId],
+    );
+    if (!branch.rowCount) throw notFound("BRANCH_NOT_FOUND", "Branch does not exist");
+
+    const { from, to } = windowBounds(deps.clock(), days);
+    const { rows } = await db.query<{
+      day: string;
+      sales_total_cents: string;
+      sales_count: string;
+    }>(
+      // Series bounds are separate date parameters: reusing the timestamptz
+      // bounds would let Postgres infer them as `date` and truncate the window
+      // in the session timezone.
+      `WITH series AS (
+         SELECT generate_series($4::date, $5::date, interval '1 day')::date AS day
+       ), agg AS (
+         SELECT (created_at AT TIME ZONE 'UTC')::date AS day,
+                COALESCE(SUM(total_amount_cents) FILTER (WHERE payment_status = 'PAID'), 0) AS total,
+                COUNT(*) FILTER (WHERE payment_status = 'PAID') AS cnt
+           FROM sale
+          WHERE branch_id = $1 AND created_at >= $2 AND created_at < $3
+          GROUP BY 1
+       )
+       SELECT to_char(s.day, 'YYYY-MM-DD') AS day,
+              COALESCE(a.total, 0) AS sales_total_cents,
+              COALESCE(a.cnt, 0) AS sales_count
+         FROM series s
+         LEFT JOIN agg a ON a.day = s.day
+        ORDER BY s.day`,
+      [branchId, from, to, isoDate(from), isoDate(new Date(to.getTime() - DAY_MS))],
+    );
+
+    return {
+      branch_id: branchId,
+      branch_name: branch.rows[0]!.name,
+      days,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      points: rows.map((r) => ({
+        date: r.day,
+        sales_total_cents: Number(r.sales_total_cents),
+        sales_count: Number(r.sales_count),
+      })),
+    };
+  });
+
+  // Revenue, sale count, low stock and live devices per branch for the same window.
+  app.get("/reports/branch-comparison", async (req) => {
+    const claims = await guards.requireAdmin(req);
+    const { days } = REPORT_WINDOW.parse(req.query);
+    const { from, to } = windowBounds(deps.clock(), days);
+    const branchIds = claims.role === "OWNER" ? null : claims.branch_ids;
+
+    const { rows } = await db.query<{
+      branch_id: string;
+      name: string;
+      sales_total_cents: string;
+      sales_count: string;
+      low_stock_items: string;
+      devices_count: string;
+    }>(
+      `SELECT b.id AS branch_id, b.name,
+              COALESCE(SUM(s.total_amount_cents) FILTER (WHERE s.payment_status = 'PAID'), 0) AS sales_total_cents,
+              COUNT(s.id) FILTER (WHERE s.payment_status = 'PAID') AS sales_count,
+              (SELECT COUNT(*) FROM product p
+                WHERE p.branch_id = b.id AND p.deleted_at IS NULL AND p.is_active
+                  AND p.stock_quantity <= $4) AS low_stock_items,
+              (SELECT COUNT(*) FROM device d WHERE d.branch_id = b.id AND NOT d.is_revoked) AS devices_count
+         FROM branch b
+         LEFT JOIN sale s ON s.branch_id = b.id AND s.created_at >= $2 AND s.created_at < $3
+        WHERE b.deleted_at IS NULL AND ($1::uuid[] IS NULL OR b.id = ANY($1::uuid[]))
+        GROUP BY b.id, b.name
+        ORDER BY sales_total_cents DESC, b.name`,
+      [branchIds, from, to, LOW_STOCK_THRESHOLD],
+    );
+
+    return {
+      days,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      branches: rows.map((r) => ({
+        branch_id: r.branch_id,
+        name: r.name,
+        sales_total_cents: Number(r.sales_total_cents),
+        sales_count: Number(r.sales_count),
+        low_stock_items: Number(r.low_stock_items),
+        devices_count: Number(r.devices_count),
+      })),
     };
   });
 }

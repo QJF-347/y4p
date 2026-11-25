@@ -10,12 +10,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sixteenhalves.orangeadmin.domain.ApplicationState
 import com.sixteenhalves.orangeadmin.domain.BiometricPreference
+import com.sixteenhalves.orangeadmin.domain.BranchComparisonRow
 import com.sixteenhalves.orangeadmin.domain.BranchDetail
 import com.sixteenhalves.orangeadmin.domain.BranchOverview
 import com.sixteenhalves.orangeadmin.domain.DashboardSummary
 import com.sixteenhalves.orangeadmin.domain.EventManager
 import com.sixteenhalves.orangeadmin.domain.InventoryProduct
 import com.sixteenhalves.orangeadmin.domain.NotificationPreferences
+import com.sixteenhalves.orangeadmin.domain.PaymentSettings
+import com.sixteenhalves.orangeadmin.domain.SalesTrend
 import com.sixteenhalves.orangeadmin.domain.SessionManager
 import com.sixteenhalves.orangeadmin.domain.ThemePreference
 import com.sixteenhalves.orangeadmin.domain.TopSeller
@@ -73,6 +76,15 @@ class MainViewModel
         private val _branches = MutableStateFlow<UiState<List<BranchOverview>>>(UiState.Loading)
         val branches = _branches.asStateFlow()
 
+        private val _salesTrend = MutableStateFlow<UiState<SalesTrend>>(UiState.Loading)
+        val salesTrend = _salesTrend.asStateFlow()
+
+        private val _branchComparison = MutableStateFlow<UiState<List<BranchComparisonRow>>>(UiState.Loading)
+        val branchComparison = _branchComparison.asStateFlow()
+
+        private var salesTrendJob: Job? = null
+        private var branchComparisonJob: Job? = null
+
         private val _inventory = MutableStateFlow<UiState<List<InventoryProduct>>>(UiState.Loading)
         val inventory = _inventory.asStateFlow()
 
@@ -109,6 +121,14 @@ class MainViewModel
                     started = SharingStarted.WhileSubscribed(5000),
                     initialValue = BiometricPreference(),
                 )
+
+        /** Local-only M-Pesa credentials; read by the payment settings screen. */
+        val paymentSettings: StateFlow<PaymentSettings> =
+            settingsPreferencesRepository.paymentSettings.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = PaymentSettings(),
+            )
 
         val snackbarHostState = SnackbarHostState()
 
@@ -200,6 +220,35 @@ class MainViewModel
                     } finally {
                         _isRefreshingDashboard.value = false
                     }
+                }
+        }
+
+        fun loadSalesTrend(
+            branchId: String,
+            days: Int,
+        ) {
+            salesTrendJob?.cancel()
+            salesTrendJob =
+                viewModelScope.launch {
+                    _salesTrend.value = UiState.Loading
+                    _salesTrend.value =
+                        adminRepository.getSalesTrend(branchId, days).fold(
+                            onSuccess = { UiState.Ready(it) },
+                            onFailure = { UiState.Failed(it.userFacingMessage("Couldn't load the sales trend")) },
+                        )
+                }
+        }
+
+        fun loadBranchComparison(days: Int) {
+            branchComparisonJob?.cancel()
+            branchComparisonJob =
+                viewModelScope.launch {
+                    _branchComparison.value = UiState.Loading
+                    _branchComparison.value =
+                        adminRepository.getBranchComparison(days).fold(
+                            onSuccess = { UiState.Ready(it) },
+                            onFailure = { UiState.Failed(it.userFacingMessage("Couldn't load the branch comparison")) },
+                        )
                 }
         }
 
@@ -452,6 +501,12 @@ class MainViewModel
         fun updateTheme(themePreference: ThemePreference) {
             viewModelScope.launch {
                 settingsPreferencesRepository.updateThemePreference(themePreference)
+            }
+        }
+
+        fun updatePaymentSettings(settings: PaymentSettings) {
+            viewModelScope.launch {
+                settingsPreferencesRepository.updatePaymentSettings(settings)
             }
         }
 

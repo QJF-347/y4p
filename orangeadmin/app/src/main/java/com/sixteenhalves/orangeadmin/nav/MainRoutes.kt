@@ -12,10 +12,12 @@ import com.sixteenhalves.orangeadmin.screens.main.BranchNameScreen
 import com.sixteenhalves.orangeadmin.screens.main.BranchesScreen
 import com.sixteenhalves.orangeadmin.screens.main.HomeScreen
 import com.sixteenhalves.orangeadmin.screens.main.InventoryScreen
+import com.sixteenhalves.orangeadmin.screens.main.ReportsScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsAccountScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsAppDetailsScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsBiometricsScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsNotificationsScreen
+import com.sixteenhalves.orangeadmin.screens.main.SettingsPaymentScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsScreen
 import com.sixteenhalves.orangeadmin.screens.main.SettingsThemeScreen
 import com.sixteenhalves.orangeadmin.viewmodels.MainViewModel
@@ -26,6 +28,8 @@ sealed interface MainRoutes : AppRoute {
     @Serializable data object HomeRoute : MainRoutes
 
     @Serializable data object Branches : MainRoutes
+
+    @Serializable data object Reports : MainRoutes
 
     @Serializable data object Settings : MainRoutes
 }
@@ -72,6 +76,8 @@ sealed interface SettingsRoutes : AppRoute {
 
     @Serializable data object Notifications : SettingsRoutes
 
+    @Serializable data object Payment : SettingsRoutes
+
     @Serializable data object AppDetails : SettingsRoutes
 
     @Serializable data object Account: SettingsRoutes
@@ -90,6 +96,12 @@ fun EntryProviderScope<AppRoute>.mainGraph(
                     { backStack.add(BranchRoutes.Name) },
                 canManage = canManage,
             )
+        }
+    }
+
+    entry<MainRoutes.Reports> {
+        MainAppShell(backStack = backStack, mainViewModel = mainViewModel) {
+            ReportsScreen(mainViewModel = mainViewModel)
         }
     }
 
@@ -203,6 +215,7 @@ fun EntryProviderScope<AppRoute>.mainGraph(
                 onNavigateTheme = { backStack.add(SettingsRoutes.Theme) },
                 onNavigateBiometrics = { backStack.add(SettingsRoutes.Biometrics) },
                 onNavigateNotifications = { backStack.add(SettingsRoutes.Notifications) },
+                onNavigatePaymentSettings = { backStack.add(SettingsRoutes.Payment) },
                 onNavigateAppDetails = { backStack.add(SettingsRoutes.AppDetails) },
                 onNavigateAccountDetails = { backStack.add(SettingsRoutes.Account)},
                 mainViewModel = mainViewModel,
@@ -223,6 +236,9 @@ fun EntryProviderScope<AppRoute>.mainGraph(
     }
     entry<SettingsRoutes.Notifications> {
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) { SettingsNotificationsScreen(mainViewModel = mainViewModel) }
+    }
+    entry<SettingsRoutes.Payment> {
+        MainAppShell(backStack = backStack, mainViewModel = mainViewModel) { SettingsPaymentScreen(mainViewModel = mainViewModel) }
     }
     entry<SettingsRoutes.AppDetails> {
         MainAppShell(backStack = backStack, mainViewModel = mainViewModel) { SettingsAppDetailsScreen() }

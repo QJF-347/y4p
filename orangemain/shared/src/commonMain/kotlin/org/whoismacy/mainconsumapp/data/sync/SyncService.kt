@@ -49,6 +49,25 @@ class SyncService(
         withContext(Dispatchers.Default) { pushLocked() }
     }
 
+    /**
+     * One full background cycle: upload local changes, download server changes,
+     * then report liveness. A failure in one step must not stop the others, and
+     * an unprovisioned till just skips the heartbeat.
+     */
+    suspend fun syncCycle() {
+        runCatching { pushPending() }
+        runCatching { pull() }
+        runCatching { heartbeat() }
+    }
+
+    /** Sends the heartbeat with the current outbox depth for the admin device register. */
+    suspend fun heartbeat() {
+        val pending =
+            database.productQueries.selectUnsynced().executeAsList().size +
+                database.saleQueries.selectUnsynced().executeAsList().size
+        api.heartbeat(outboxPending = pending)
+    }
+
     suspend fun pull(): PullOutcome = mutex.withLock {
         withContext(Dispatchers.Default) { pullLocked() }
     }

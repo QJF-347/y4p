@@ -63,8 +63,7 @@ fun App() {
             val syncScope = rememberCoroutineScope()
             LaunchedEffect(Unit) {
                 while (true) {
-                    runCatching { syncService.pushPending() }
-                    runCatching { syncService.pull() }
+                    syncService.syncCycle()
                     delay(60_000)
                 }
             }
@@ -78,8 +77,7 @@ fun App() {
                                 TextButton(
                                     onClick = {
                                         syncScope.launch {
-                                            runCatching { syncService.pushPending() }
-                                            runCatching { syncService.pull() }
+                                            syncService.syncCycle()
                                         }
                                     }
                                 ) {

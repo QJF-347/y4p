@@ -9,6 +9,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 data class AuthResponse(
     @SerializedName("access_token") val accessToken: String? = null,
@@ -138,6 +139,19 @@ interface NetworkService {
 
     @GET("/api/v1/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummaryDto>
+
+    // --- Reports (API_CONTRACT §4.4) ---
+
+    @GET("/api/v1/branches/{id}/reports/sales-trend")
+    suspend fun getSalesTrend(
+        @Path("id") id: String,
+        @Query("days") days: Int,
+    ): Response<SalesTrendDto>
+
+    @GET("/api/v1/reports/branch-comparison")
+    suspend fun getBranchComparison(
+        @Query("days") days: Int,
+    ): Response<BranchComparisonDto>
 }
 
 data class DataEnvelope<T>(
@@ -171,6 +185,8 @@ data class DeviceDto(
     val name: String? = null,
     @SerializedName("device_code") val deviceCode: String? = null,
     @SerializedName("is_revoked") val isRevoked: Boolean? = null,
+    @SerializedName("last_seen_at") val lastSeenAt: String? = null,
+    @SerializedName("app_version") val appVersion: String? = null,
 )
 
 data class TopSellerDto(
@@ -201,6 +217,33 @@ data class CreateBranchRequest(
     val name: String,
     val code: String,
     val location: String,
+)
+
+data class SalesTrendPointDto(
+    val date: String? = null,
+    @SerializedName("sales_total_cents") val salesTotalCents: Long? = null,
+    @SerializedName("sales_count") val salesCount: Int? = null,
+)
+
+data class SalesTrendDto(
+    @SerializedName("branch_id") val branchId: String? = null,
+    @SerializedName("branch_name") val branchName: String? = null,
+    val days: Int? = null,
+    val points: List<SalesTrendPointDto>? = null,
+)
+
+data class BranchComparisonRowDto(
+    @SerializedName("branch_id") val branchId: String? = null,
+    val name: String? = null,
+    @SerializedName("sales_total_cents") val salesTotalCents: Long? = null,
+    @SerializedName("sales_count") val salesCount: Int? = null,
+    @SerializedName("low_stock_items") val lowStockItems: Int? = null,
+    @SerializedName("devices_count") val devicesCount: Int? = null,
+)
+
+data class BranchComparisonDto(
+    val days: Int? = null,
+    val branches: List<BranchComparisonRowDto>? = null,
 )
 
 data class CreateCategoryRequest(

@@ -34,6 +34,8 @@ data class DeviceInfo(
     val name: String,
     val code: String,
     val isRevoked: Boolean,
+    val lastSeenAt: String? = null,
+    val appVersion: String? = null,
 )
 
 data class InventoryProduct(
@@ -67,6 +69,46 @@ data class BranchDetail(
 data class CategoryOption(
     val id: String,
     val name: String,
+)
+
+/**
+ * M-Pesa credentials an owner records for a future deployment. They are kept
+ * only in this device's DataStore and are never sent to the API; the backend
+ * reads Daraja credentials from its own environment.
+ */
+data class PaymentSettings(
+    val paybillNumber: String = "",
+    val buyGoodsTill: String = "",
+    val consumerKey: String = "",
+    val consumerSecret: String = "",
+    val passkey: String = "",
+    val shortcode: String = "",
+) {
+    val isConfigured: Boolean get() = listOf(paybillNumber, buyGoodsTill, consumerKey, consumerSecret, passkey, shortcode).any { it.isNotBlank() }
+}
+
+/** One day of paid sales on the Sales Trends report (UTC dates, zero-filled). */
+data class SalesTrendPoint(
+    val date: String,
+    val salesTotalCents: Long,
+    val salesCount: Int,
+)
+
+data class SalesTrend(
+    val branchId: String,
+    val branchName: String,
+    val days: Int,
+    val points: List<SalesTrendPoint>,
+)
+
+/** One branch's row in the Branch Comparison report for the same window. */
+data class BranchComparisonRow(
+    val branchId: String,
+    val name: String,
+    val salesTotalCents: Long,
+    val salesCount: Int,
+    val lowStockItems: Int,
+    val devicesCount: Int,
 )
 
 sealed interface UiState<out T> {

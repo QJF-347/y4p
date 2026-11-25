@@ -26,6 +26,11 @@ enum class MainScreenNavigationItems(
         R.drawable.outline_call_split_24,
         BranchRoutes.Home,
     ),
+    Reports(
+        "Reports",
+        R.drawable.outline_bar_chart_24,
+        MainRoutes.Reports,
+    ),
     Settings(
         "Settings",
         R.drawable.outline_settings_24,
