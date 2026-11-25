@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.whoismacy.mainconsumapp.data.model.PaymentMethod
+import org.whoismacy.mainconsumapp.data.model.PaymentStatus
 import org.whoismacy.mainconsumapp.data.model.Sale
 import org.whoismacy.mainconsumapp.data.model.SaleItem
 import org.whoismacy.mainconsumapp.util.CurrencyFormatter
@@ -106,11 +108,19 @@ fun ReceiptView(
         Spacer(modifier = Modifier.height(8.dp))
         
         // Payment Info
-        ReceiptRow("${sale.paymentMethod}:", CurrencyFormatter.format(sale.amountReceived))
-        ReceiptRow("Change:", CurrencyFormatter.format(sale.changeAmount))
-        
-        if (sale.paymentMethod.name == "MPESA" && sale.mpesaRef != null) {
-            ReceiptRow("M-PESA Ref:", sale.mpesaRef)
+        if (sale.paymentMethod == PaymentMethod.SPLIT) {
+            ReceiptRow("Cash:", CurrencyFormatter.format(sale.cashAmount))
+            ReceiptRow("M-PESA:", CurrencyFormatter.format(sale.totalAmount - sale.cashAmount))
+            sale.mpesaRef?.let { ReceiptRow("M-PESA Ref:", it) }
+            if (sale.paymentStatus != PaymentStatus.PAID) {
+                ReceiptRow("M-PESA leg:", sale.paymentStatus.name)
+            }
+        } else {
+            ReceiptRow("${sale.paymentMethod}:", CurrencyFormatter.format(sale.amountReceived))
+            ReceiptRow("Change:", CurrencyFormatter.format(sale.changeAmount))
+            if (sale.paymentMethod == PaymentMethod.MPESA) {
+                sale.mpesaRef?.let { ReceiptRow("M-PESA Ref:", it) }
+            }
         }
         
         Spacer(modifier = Modifier.height(16.dp))

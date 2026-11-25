@@ -117,13 +117,14 @@ Created by the POS **offline**, then pushed. Append-only: once inserted, all fin
 | `device_id` | TEXT / TEXT / String | ✓ | **No** | Registered device that created the sale. Also carries the `DEVICE_CODE` used in receipts. |
 | `cashier_id` | UUID / TEXT / String | ✓ | **No** | FK → users. |
 | `cashier_name` | TEXT / TEXT / String | ✓ | **No** | Denormalized snapshot for receipts (users can be renamed). |
-| `payment_method` | TEXT / TEXT / String | ✓ | **No** | `CASH` \| `MPESA` \| `CARD`. |
+| `payment_method` | TEXT / TEXT / String | ✓ | **No** | `CASH` \| `MPESA` \| `CARD` \| `SPLIT`. |
 | `subtotal_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Sum of line totals. |
 | `tax_amount_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Sum of per-line tax, each rounded half-up (see §5.3). |
 | `total_amount_cents` | BIGINT / INTEGER / Long | ✓ | **No** | `subtotal + tax`. |
-| `amount_received_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Cash tendered; equal to `total_amount_cents` for non-cash. |
-| `change_amount_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Cash only; `0` otherwise. `>= 0`. |
-| `payment_status` | TEXT / TEXT / String | ✓ | **Server only** | `PENDING` \| `PAID` \| `FAILED`. Rule: device creates `CASH`/`CARD` sales as `PAID`; `MPESA` sales as `PENDING`. Only the backend may transition M-Pesa status (§4.1). |
+| `amount_received_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Cash tendered; equal to `total_amount_cents` for non-cash. For `SPLIT`, equal to `cash_amount_cents` (cash was taken exactly). |
+| `change_amount_cents` | BIGINT / INTEGER / Long | ✓ | **No** | Change handed back; `0` for `SPLIT` (no over-tender on the cash leg), `0` otherwise unless cash over-tendered. `>= 0`. |
+| `cash_amount_cents` | BIGINT / INTEGER / Long | ✓ | **No** | `SPLIT` only: cash portion, `0 < cash_amount_cents < total_amount_cents`. The M-Pesa leg is the remainder (`total_amount_cents - cash_amount_cents`). Must be `0` for `CASH`/`MPESA`/`CARD`. |
+| `payment_status` | TEXT / TEXT / String | ✓ | **Server only** | `PENDING` \| `PAID` \| `FAILED`. Rule: device creates `CASH`/`CARD` sales as `PAID`; `MPESA` and `SPLIT` sales as `PENDING`. Only the backend may transition M-Pesa status (§4.1). |
 | `mpesa_receipt` | TEXT / TEXT / String | – | **Write-once (server)** | Denormalized copy of the winning `PaymentTransaction.mpesa_receipt_number`. NULL for cash/card. The **canonical** source is PaymentTransaction. |
 | `created_at` | TIMESTAMPTZ / TEXT / String | ✓ | **No** | Device clock. |
 | `sync_status` | – / TEXT / String | local | Yes | Local only. |
@@ -178,7 +179,7 @@ One row per STK-push attempt. The backend creates it; the POS may display it. Id
 | Branch | `id`, `code`, `created_at` | `name`, `location`, `is_active`, `updated_at`, `deleted_at` | — | (admin API on behalf of admin) |
 | Category | `id`, `branch_id`, `created_at` | `name`, `sort_order`, `updated_at`, `deleted_at` | — | — |
 | Product | `id`, `branch_id`, `created_at` | `name`, `category_id`, `sku`, `barcode`, `price_cents`, `tax_rate_bp`, `cost_price_cents`, `stock_quantity`*, `image_url`, `is_active`, `updated_at`, `deleted_at` | — | `stock_quantity` when driven by sale deltas |
-| Sale | `id`, `receipt_number`, `branch_id`, `device_id`, `cashier_id`, `cashier_name`, `payment_method`, `subtotal_cents`, `tax_amount_cents`, `total_amount_cents`, `amount_received_cents`, `change_amount_cents`, `created_at` | `payment_status` (PENDING only) | `mpesa_receipt` | `payment_status`, `mpesa_receipt` |
+| Sale | `id`, `receipt_number`, `branch_id`, `device_id`, `cashier_id`, `cashier_name`, `payment_method`, `subtotal_cents`, `tax_amount_cents`, `total_amount_cents`, `amount_received_cents`, `change_amount_cents`, `cash_amount_cents`, `created_at` | `payment_status` (PENDING only) | `mpesa_receipt` | `payment_status`, `mpesa_receipt` |
 | SaleItem | **all fields** (append-only) | — | — | — |
 | PaymentTransaction | `id`, `sale_id`, `amount_cents`, `phone_number`, `created_at` | `status` (terminal), `result_code`, `result_desc`, `updated_at` | `checkout_request_id`, `merchant_request_id`, `mpesa_receipt_number`, `raw_payload_ref` | `status`, `result_code`, `result_desc`, `updated_at`, receipt fields |
 
@@ -199,9 +200,14 @@ MPESA sales:        created as PENDING (device)
                       ├─ any PaymentTransaction SUCCESS  → PAID     (server)
                       ├─ ≥1 PENDING remains               → PENDING
                       └─ all attempts FAILED, none ok     → FAILED   (server)
+SPLIT sales:        created as PENDING (device; cash leg taken at counter)
+                      ├─ any PaymentTransaction SUCCESS  → PAID     (server)
+                      └─ every attempt FAILED / expired   → PENDING   (retryable)
 ```
 
-`PAID` and `FAILED` are terminal in v1. Refunds/reversals are separate future events (deferred).
+`PAID` and `FAILED` are terminal in v1. A `SPLIT` sale whose M-Pesa leg fails does **not** flip to `FAILED`:
+cash was already collected and the till may retry the M-Pesa remainder with a new STK push. It stays `PENDING`
+until a leg succeeds; an operator resolves abandoned ones. Refunds/reversals are separate future events (deferred).
 
 ### 4.2 `PaymentTransaction.status`
 
@@ -459,18 +465,25 @@ CREATE TABLE sale (
   device_id            TEXT NOT NULL,
   cashier_id           UUID NOT NULL,          -- REFERENCES users(id) once users table exists
   cashier_name         TEXT NOT NULL,
-  payment_method       TEXT NOT NULL CHECK (payment_method IN ('CASH','MPESA','CARD')),
+  payment_method       TEXT NOT NULL CHECK (payment_method IN ('CASH','MPESA','CARD','SPLIT')),
   subtotal_cents       BIGINT NOT NULL CHECK (subtotal_cents >= 0),
   tax_amount_cents     BIGINT NOT NULL CHECK (tax_amount_cents >= 0),
   total_amount_cents   BIGINT NOT NULL CHECK (total_amount_cents >= 0),
   amount_received_cents BIGINT NOT NULL CHECK (amount_received_cents >= 0),
   change_amount_cents  BIGINT NOT NULL DEFAULT 0 CHECK (change_amount_cents >= 0),
+  cash_amount_cents    BIGINT NOT NULL DEFAULT 0
+                         CHECK (cash_amount_cents BETWEEN 0 AND total_amount_cents),
   payment_status       TEXT NOT NULL DEFAULT 'PENDING' CHECK (payment_status IN ('PENDING','PAID','FAILED')),
   mpesa_receipt        TEXT,
   created_at           TIMESTAMPTZ NOT NULL,
   received_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   server_version       BIGINT NOT NULL DEFAULT 0,
-  UNIQUE (branch_id, receipt_number)
+  UNIQUE (branch_id, receipt_number),
+  -- Split shape: SPLIT carries a non-zero cash leg below the total; other methods carry none.
+  CONSTRAINT sale_split_shape CHECK (
+    (payment_method =  'SPLIT' AND cash_amount_cents > 0 AND cash_amount_cents < total_amount_cents)
+    OR (payment_method <> 'SPLIT' AND cash_amount_cents = 0)
+  )
 );
 
 CREATE TABLE sale_item (
@@ -535,3 +548,4 @@ Original proposed fields were accepted with these changes (all deliberate):
 | 10 | `Sale.mpesa_receipt` kept but defined as write-once denormalized cache | one canonical source (PaymentTransaction) + one convenience copy for reports. |
 | 11 | `Branch.devicesCount` / `todaySales` are not entity fields; `isActive` → `is_active` | presentational/aggregate data would go stale in sync. |
 | 12 | Phone numbers E.164; timestamps RFC 3339 UTC with ms | unambiguous transport. |
+| 13 | `Sale`: added `SPLIT` method + `cash_amount_cents` with `sale_split_shape` check; SPLIT stays `PENDING` on M-Pesa failure | part-cash/part-M-Pesa tender at the till; cash collected must not be stranded by a failed STK, so the sale stays retryable. |

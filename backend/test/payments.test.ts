@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
+import { RateLimiter } from "../src/lib/rate-limit.js";
 import { expirePendingStk } from "../src/routes/payments.js";
 import {
   closePool,
@@ -378,4 +379,174 @@ test("stk-push requires an MPESA sale in PENDING state", async () => {
   const res = await stkPush(app, device.deviceToken, cashSale.id);
   assert.equal(res.statusCode, 422);
   assert.equal(res.json().error.code, "NOT_MPESA_SALE");
+});
+
+// --- SPLIT tender: part cash, part M-Pesa -----------------------------------
+
+const SPLIT_CASH = 40_000; // total is 100_000 cents, so the M-Pesa leg is 60_000
+
+async function pushSplitSale(
+  app: App,
+  branchId: string,
+  device: { deviceId: string; deviceToken: string },
+  product: { id: string },
+  cashCents = SPLIT_CASH,
+) {
+  const sale = salePayload(branchId, device.deviceId, product, {
+    payment_method: "SPLIT",
+    payment_status: "PENDING",
+    amount_received_cents: cashCents,
+    change_amount_cents: 0,
+    cash_amount_cents: cashCents,
+  });
+  const res = await pushBatch(app, device.deviceToken, {
+    device_id: device.deviceId,
+    branch_id: branchId,
+    sales: [sale],
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const row = (res.json() as { results: { entity: string; id: string; status: string }[] }).results.find(
+    (r) => r.entity === "sale" && r.id === sale.id,
+  );
+  assert.equal(row?.status, "SYNCED");
+  return sale;
+}
+
+function stkPushAmount(app: App, deviceToken: string, saleId: string, amountCents: number) {
+  return app.inject({
+    method: "POST",
+    url: "/api/v1/payments/stk-push",
+    headers: { "x-device-token": deviceToken },
+    payload: { sale_id: saleId, phone_number: "+254712345678", amount_cents: amountCents },
+  });
+}
+
+test("split sale charges only the M-Pesa remainder", async () => {
+  const { app, branchId, device, product } = await setup();
+  const sale = await pushSplitSale(app, branchId, device, product);
+
+  const res = await stkPushAmount(app, device.deviceToken, sale.id, 60_000);
+  assert.equal(res.statusCode, 202, res.body);
+  const body = res.json() as { status: string; amount_cents: number };
+  assert.equal(body.status, "PENDING");
+  assert.equal(body.amount_cents, 60_000);
+
+  const { rows } = await pool.query<{ amount_cents: string }>(
+    `SELECT amount_cents FROM payment_transaction WHERE sale_id = $1`,
+    [sale.id],
+  );
+  assert.equal(Number(rows[0]!.amount_cents), 60_000);
+
+  const { rows: saleRows } = await pool.query<{ payment_status: string; cash_amount_cents: string }>(
+    `SELECT payment_status, cash_amount_cents FROM sale WHERE id = $1`,
+    [sale.id],
+  );
+  assert.equal(saleRows[0]!.payment_status, "PENDING");
+  assert.equal(Number(saleRows[0]!.cash_amount_cents), SPLIT_CASH);
+});
+
+test("split stk-push compares amount_cents against the remainder", async () => {
+  const { app, branchId, device, product } = await setup();
+  const sale = await pushSplitSale(app, branchId, device, product);
+
+  const wrong = await stkPushAmount(app, device.deviceToken, sale.id, 100_000);
+  assert.equal(wrong.statusCode, 422);
+  assert.equal(wrong.json().error.code, "AMOUNT_MISMATCH");
+  assert.equal(wrong.json().error.details.expected_cents, 60_000);
+});
+
+test("split remainder must be whole shillings and at least one", async () => {
+  const { app, branchId, device, product } = await setup();
+
+  const fractional = await pushSplitSale(app, branchId, device, product);
+  await pool.query(`UPDATE sale SET cash_amount_cents = 40050 WHERE id = $1`, [fractional.id]);
+  const res = await stkPush(app, device.deviceToken, fractional.id);
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.json().error.code, "AMOUNT_NOT_WHOLE_KES");
+
+  const tiny = await pushSplitSale(app, branchId, device, product);
+  await pool.query(`UPDATE sale SET cash_amount_cents = 99901 WHERE id = $1`, [tiny.id]);
+  const small = await stkPush(app, device.deviceToken, tiny.id);
+  assert.equal(small.statusCode, 422);
+  assert.equal(small.json().error.code, "AMOUNT_TOO_SMALL");
+});
+
+test("a failed split callback leaves the sale PENDING and allows a retry", async () => {
+  const { app, deps, branchId, device, product } = await setup();
+  const sale = await pushSplitSale(app, branchId, device, product);
+  const attempt = await startAttempt(app, device.deviceToken, sale.id);
+
+  await callback(app, attempt.checkout_request_id, { resultCode: 1032 });
+
+  const failed = await poll(app, device.deviceToken, attempt.payment_transaction_id);
+  assert.equal(failed.json().status, "FAILED");
+  const afterFailure = await pool.query<{ payment_status: string }>(
+    `SELECT payment_status FROM sale WHERE id = $1`,
+    [sale.id],
+  );
+  assert.equal(afterFailure.rows[0]!.payment_status, "PENDING");
+
+  // Move the per-sale rate limiter past its 3 s window without sleeping.
+  let now = Date.now();
+  deps.limiter = new RateLimiter(() => now);
+  now += 4_000;
+
+  const retry = await startAttempt(app, device.deviceToken, sale.id);
+  await callback(app, retry.checkout_request_id, { receipt: "QKSPLIT01" });
+
+  const { rows } = await pool.query<{ payment_status: string; mpesa_receipt: string | null; cash_amount_cents: string }>(
+    `SELECT payment_status, mpesa_receipt, cash_amount_cents FROM sale WHERE id = $1`,
+    [sale.id],
+  );
+  assert.equal(rows[0]!.payment_status, "PAID");
+  assert.equal(rows[0]!.mpesa_receipt, "QKSPLIT01");
+  assert.equal(Number(rows[0]!.cash_amount_cents), SPLIT_CASH);
+});
+
+test("the timeout sweeper leaves a SPLIT sale PENDING", async () => {
+  const { app, deps, branchId, device, product } = await setup();
+  const sale = await pushSplitSale(app, branchId, device, product);
+  const attempt = await startAttempt(app, device.deviceToken, sale.id);
+
+  await pool.query(
+    `UPDATE payment_transaction SET created_at = now() - interval '10 minutes' WHERE id = $1`,
+    [attempt.payment_transaction_id],
+  );
+  const expired = await expirePendingStk(deps);
+  assert.equal(expired, 1);
+
+  const status = await poll(app, device.deviceToken, attempt.payment_transaction_id);
+  assert.equal(status.json().status, "FAILED");
+  const { rows } = await pool.query<{ payment_status: string }>(
+    `SELECT payment_status FROM sale WHERE id = $1`,
+    [sale.id],
+  );
+  assert.equal(rows[0]!.payment_status, "PENDING");
+});
+
+test("a receipt collision leaves a SPLIT sale PENDING for reconciliation", async () => {
+  const { app, branchId, device, product } = await setup();
+
+  // Claim the receipt on an unrelated, fully paid M-Pesa sale first.
+  const other = await pushMpesaSale(app, branchId, device, product);
+  const otherAttempt = await startAttempt(app, device.deviceToken, other.id);
+  await callback(app, otherAttempt.checkout_request_id, { receipt: "QKCOLLIDE" });
+
+  const sale = await pushSplitSale(app, branchId, device, product);
+  const attempt = await startAttempt(app, device.deviceToken, sale.id);
+  await callback(app, attempt.checkout_request_id, { receipt: "QKCOLLIDE" });
+
+  const failed = await poll(app, device.deviceToken, attempt.payment_transaction_id);
+  assert.equal(failed.json().status, "FAILED");
+  const { rows } = await pool.query<{ payment_status: string }>(
+    `SELECT payment_status FROM sale WHERE id = $1`,
+    [sale.id],
+  );
+  assert.equal(rows[0]!.payment_status, "PENDING");
+
+  const queued = await pool.query(
+    `SELECT 1 FROM reconciliation_queue WHERE payment_transaction_id = $1`,
+    [attempt.payment_transaction_id],
+  );
+  assert.equal(queued.rowCount, 1);
 });

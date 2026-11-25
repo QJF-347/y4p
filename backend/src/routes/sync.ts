@@ -51,12 +51,14 @@ const saleIn = z.object({
   device_id: z.string().min(1).max(64).optional(),
   cashier_id: uuid,
   cashier_name: z.string().trim().min(1).max(120),
-  payment_method: z.enum(["CASH", "MPESA", "CARD"]),
+  payment_method: z.enum(["CASH", "MPESA", "CARD", "SPLIT"]),
   subtotal_cents: z.number().int().min(0),
   tax_amount_cents: z.number().int().min(0),
   total_amount_cents: z.number().int().min(0),
   amount_received_cents: z.number().int().min(0),
   change_amount_cents: z.number().int().min(0).default(0),
+  /** SPLIT only: the cash leg; the M-Pesa leg is total - cash. */
+  cash_amount_cents: z.number().int().min(0).default(0),
   payment_status: z.enum(["PENDING", "PAID", "FAILED"]),
   mpesa_receipt: z.string().trim().max(32).nullish(),
   created_at: timestampText,
@@ -119,6 +121,7 @@ type ExistingSale = {
   total_amount_cents: string;
   amount_received_cents: string;
   change_amount_cents: string;
+  cash_amount_cents: string;
   created_at: Date;
   payment_status: string;
   server_version: string;
@@ -145,6 +148,7 @@ async function saleDrift(
     ["total_amount_cents", stored.total_amount_cents, sale.total_amount_cents],
     ["amount_received_cents", stored.amount_received_cents, sale.amount_received_cents],
     ["change_amount_cents", stored.change_amount_cents, sale.change_amount_cents],
+    ["cash_amount_cents", stored.cash_amount_cents, sale.cash_amount_cents],
   ];
   for (const [field, actual, expected] of amounts) {
     if (Number(actual) !== expected) diffs.push(field);
@@ -189,6 +193,26 @@ function drifted(a: string | null, b: string | null): boolean {
   return (a ?? null) !== (b ?? null);
 }
 
+/**
+ * SPLIT shape (API_CONTRACT §5): part cash, remainder via M-Pesa in whole
+ * shillings of at least KES 1. Non-SPLIT sales may not carry a cash leg.
+ */
+function splitShapeError(sale: z.output<typeof saleIn>): string | null {
+  if (sale.payment_method !== "SPLIT") {
+    return sale.cash_amount_cents === 0 ? null : "cash_amount_cents must be 0 unless payment_method is SPLIT";
+  }
+  const cash = sale.cash_amount_cents;
+  const remainder = sale.total_amount_cents - cash;
+  if (cash <= 0 || cash >= sale.total_amount_cents) {
+    return "SPLIT needs 0 < cash_amount_cents < total_amount_cents";
+  }
+  if (remainder < 100) return "the M-Pesa remainder must be at least 100 cents";
+  if (remainder % 100 !== 0) return "the M-Pesa remainder must be a whole number of shillings";
+  if (sale.amount_received_cents !== cash) return "amount_received_cents must equal cash_amount_cents for SPLIT";
+  if (sale.change_amount_cents !== 0) return "change_amount_cents must be 0 for SPLIT";
+  return null;
+}
+
 /** Apply the sale's line deltas exactly once; receipt uniqueness enforces the once. */
 async function applySale(
   q: Queryable,
@@ -206,18 +230,20 @@ async function applySale(
   const versions: number[] = [];
 
   // M-Pesa payment state is server-owned (API_CONTRACT §3): a device cannot push
-  // a sale as already paid, nor supply a receipt for one.
-  const paymentStatus = sale.payment_method === "MPESA" ? "PENDING" : sale.payment_status;
-  const mpesaReceipt = sale.payment_method === "MPESA" ? null : sale.mpesa_receipt ?? null;
+  // a sale as already paid, nor supply a receipt for one. SPLIT sales carry an
+  // M-Pesa leg, so they start PENDING exactly like full M-Pesa sales.
+  const mpesaSettled = sale.payment_method === "MPESA" || sale.payment_method === "SPLIT";
+  const paymentStatus = mpesaSettled ? "PENDING" : sale.payment_status;
+  const mpesaReceipt = mpesaSettled ? null : sale.mpesa_receipt ?? null;
 
   await q.query(`SAVEPOINT apply_sale`);
 
   const { rows: saleRows } = await q.query<{ server_version: string }>(
     `INSERT INTO sale (id, receipt_number, branch_id, device_id, cashier_id, cashier_name,
                        payment_method, subtotal_cents, tax_amount_cents, total_amount_cents,
-                       amount_received_cents, change_amount_cents, payment_status, mpesa_receipt,
-                       created_at, received_at, server_version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                       amount_received_cents, change_amount_cents, cash_amount_cents,
+                       payment_status, mpesa_receipt, created_at, received_at, server_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
              nextval('server_version_seq'))
      RETURNING server_version`,
     [
@@ -233,6 +259,7 @@ async function applySale(
       sale.total_amount_cents,
       sale.amount_received_cents,
       sale.change_amount_cents,
+      sale.cash_amount_cents,
       paymentStatus,
       mpesaReceipt,
       sale.created_at,
@@ -531,12 +558,23 @@ export function registerSyncRoutes(app: FastifyInstance, deps: Deps, guards: Gua
 
       // ------------------------------------------------------------- sales
       for (const sale of body.sales) {
+        const splitError = splitShapeError(sale);
+        if (splitError) {
+          results.push({
+            entity: "sale",
+            id: sale.id,
+            status: "REJECTED",
+            code: "SPLIT_AMOUNT_INVALID",
+            message: splitError,
+          });
+          continue;
+        }
         // Sales are append-only (DATA_CONTRACT §6.2): a repeated id is a replay
         // only when every immutable field matches; edits are rejected.
         const existing = await q.query<ExistingSale>(
           `SELECT receipt_number, branch_id, device_id, cashier_id, cashier_name, payment_method,
                   subtotal_cents, tax_amount_cents, total_amount_cents, amount_received_cents,
-                  change_amount_cents, created_at, payment_status, server_version
+                  change_amount_cents, cash_amount_cents, created_at, payment_status, server_version
              FROM sale WHERE id = $1`,
           [sale.id],
         );

@@ -82,6 +82,7 @@ data class SalePush(
     @SerialName("total_amount_cents") val totalAmountCents: Long,
     @SerialName("amount_received_cents") val amountReceivedCents: Long,
     @SerialName("change_amount_cents") val changeAmountCents: Long,
+    @SerialName("cash_amount_cents") val cashAmountCents: Long = 0,
     @SerialName("payment_status") val paymentStatus: String,
     @SerialName("mpesa_receipt") val mpesaReceipt: String? = null,
     @SerialName("created_at") val createdAt: String,
@@ -260,13 +261,23 @@ class BackendApi(
         return res.decode()
     }
 
-    suspend fun stkPush(saleId: String, phoneNumber: String): StkPushResponse {
+    /**
+     * Starts an STK prompt. [idempotencyKey] must be unique per attempt: a
+     * retried SPLIT sale has to reach Daraja again, so the key cannot be derived
+     * from the sale id alone.
+     */
+    suspend fun stkPush(
+        saleId: String,
+        phoneNumber: String,
+        idempotencyKey: String = "stk-$saleId",
+        amountCents: Long? = null,
+    ): StkPushResponse {
         val s = configured()
         val res = http.post("${s.root()}/api/v1/payments/stk-push") {
             header("x-device-token", s.deviceToken)
-            header("idempotency-key", "stk-$saleId")
+            header("idempotency-key", idempotencyKey)
             contentType(ContentType.Application.Json)
-            setBody(StkPushRequest(saleId = saleId, phoneNumber = phoneNumber))
+            setBody(StkPushRequest(saleId = saleId, phoneNumber = phoneNumber, amountCents = amountCents))
         }
         return res.decode()
     }

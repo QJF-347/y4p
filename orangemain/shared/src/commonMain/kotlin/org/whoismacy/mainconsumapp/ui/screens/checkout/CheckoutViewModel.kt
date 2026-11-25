@@ -18,7 +18,9 @@ import org.whoismacy.mainconsumapp.data.repository.CartRepository
 import org.whoismacy.mainconsumapp.data.repository.SettingsRepository
 import org.whoismacy.mainconsumapp.data.repository.TransactionRepository
 import org.whoismacy.mainconsumapp.data.sync.SyncService
+import org.whoismacy.mainconsumapp.util.CurrencyFormatter
 import org.whoismacy.mainconsumapp.util.UuidV7
+import kotlin.math.roundToLong
 
 data class CheckoutState(
     val amountReceivedText: String = "",
@@ -30,7 +32,18 @@ data class CheckoutState(
     val isPaymentComplete: Boolean = false,
     val completedSale: Sale? = null,
     val showReceipt: Boolean = false,
-    val cartItems: List<CartItem> = emptyList()
+    val cartItems: List<CartItem> = emptyList(),
+    /** Cash leg the cashier has typed for a SPLIT sale; the M-PESA leg is derived. */
+    val splitCashText: String = "",
+    /** Which side the keypad is editing for a SPLIT sale. */
+    val splitInputIsCash: Boolean = true,
+    /**
+     * A SPLIT sale whose M-PESA leg has not settled. The cash is already
+     * recorded, so the sale stays PENDING and the prompt can be retried without
+     * taking the cash twice.
+     */
+    val pendingSplitSale: Sale? = null,
+    val pendingSplitPhone: String? = null,
 )
 
 class CheckoutViewModel(
@@ -59,6 +72,14 @@ class CheckoutViewModel(
         // Keep the cash amount and the M-PESA number in separate fields so
         // switching method never overwrites either.
         _state.update { it.copy(selectedPaymentMethod = method, paymentError = null) }
+    }
+
+    fun onSplitCashChanged(value: String) {
+        _state.update { it.copy(splitCashText = value, paymentError = null) }
+    }
+
+    fun toggleSplitInputSide() {
+        _state.update { it.copy(splitInputIsCash = !it.splitInputIsCash, paymentError = null) }
     }
 
     /**
@@ -96,6 +117,7 @@ class CheckoutViewModel(
                     amountReceived = 0.0,
                     cashierName = settings.cashierName,
                     paymentStatus = PaymentStatus.PENDING,
+                    deviceTag = settings.deviceId,
                 ).also { cartRepository.clearCart() }
             } catch (e: Exception) {
                 _state.update { it.copy(isProcessing = false, paymentError = e.message ?: "Could not record the sale") }
@@ -201,6 +223,7 @@ class CheckoutViewModel(
                 paymentMethod = PaymentMethod.CASH,
                 amountReceived = amountReceived,
                 cashierName = settings?.cashierName,
+                deviceTag = settings?.deviceId,
             )
 
             cartRepository.clearCart()
@@ -215,6 +238,186 @@ class CheckoutViewModel(
             // later sync retry if the network is down.
             runCatching { syncService.pushPending() }
         }
+    }
+
+    /**
+     * Split tender: take some of the total in cash and charge the remainder to
+     * M-PESA. The cash is recorded immediately, so the sale is persisted
+     * PENDING and its M-PESA leg can be retried without taking the cash again.
+     */
+    fun sendSplitSale(totalAmount: Double) {
+        val cash = _state.value.splitCashText.toDoubleOrNull() ?: 0.0
+        val phone = _state.value.phoneNumberText
+        val cashCents = (cash * 100).roundToLong()
+        val totalCents = (totalAmount * 100).roundToLong()
+        splitShapeError(cashCents, totalCents)?.let { message ->
+            _state.update { it.copy(paymentError = message) }
+            return
+        }
+        if (!isPlausibleKenyanMsisdn(phone)) {
+            _state.update { it.copy(paymentError = "Enter a valid Safaricom number, e.g. 0712345678") }
+            return
+        }
+        val items = cartRepository.cartItems.value
+
+        _state.update { it.copy(isProcessing = true, paymentStatus = "Recording cash and starting M-PESA…", paymentError = null) }
+
+        viewModelScope.launch {
+            val settings = settingsRepository.current()
+            if (settings == null) {
+                _state.update { it.copy(
+                    isProcessing = false,
+                    paymentStatus = null,
+                    paymentError = "Set up this till in Device setup before taking payments."
+                ) }
+                return@launch
+            }
+
+            val saleId = UuidV7.new()
+            val cashAmount = cashCents / 100.0
+            val sale = try {
+                transactionRepository.completeSale(
+                    saleId = saleId,
+                    cartItems = items,
+                    paymentMethod = PaymentMethod.SPLIT,
+                    amountReceived = cashAmount,
+                    cashApplied = cashAmount,
+                    cashierName = settings.cashierName,
+                    paymentStatus = PaymentStatus.PENDING,
+                    deviceTag = settings.deviceId,
+                ).also { cartRepository.clearCart() }
+            } catch (e: Exception) {
+                _state.update { it.copy(isProcessing = false, paymentError = e.message ?: "Could not record the sale") }
+                return@launch
+            }
+
+            runCatching { syncService.pushPending() }
+            if (!transactionRepository.isSaleSynced(saleId)) {
+                _state.update { it.copy(
+                    isProcessing = false,
+                    paymentStatus = null,
+                    pendingSplitSale = sale,
+                    pendingSplitPhone = phone,
+                    paymentError = "Cash ${CurrencyFormatter.format(cashAmount)} recorded. M-PESA needs a connection — retry when you're back online.",
+                ) }
+                return@launch
+            }
+            runSplitStk(sale, phone)
+        }
+    }
+
+    /** Restarts just the M-PESA leg of a PENDING split sale; the cash is untouched. */
+    fun retrySplitStk() {
+        val sale = _state.value.pendingSplitSale ?: return
+        val phone = _state.value.pendingSplitPhone ?: _state.value.phoneNumberText
+        if (!isPlausibleKenyanMsisdn(phone)) {
+            _state.update { it.copy(paymentError = "Enter a valid Safaricom number, e.g. 0712345678") }
+            return
+        }
+        _state.update { it.copy(isProcessing = true, paymentStatus = "Retrying M-PESA…", paymentError = null) }
+        viewModelScope.launch {
+            runCatching { syncService.pushPending() }
+            if (!transactionRepository.isSaleSynced(sale.id)) {
+                _state.update { it.copy(
+                    isProcessing = false,
+                    paymentStatus = null,
+                    paymentError = "Still offline: the cash is recorded and the M-PESA leg will start when you're back online.",
+                ) }
+                return@launch
+            }
+            runSplitStk(sale, phone)
+        }
+    }
+
+    private suspend fun runSplitStk(sale: Sale, phone: String) {
+        try {
+            // A fresh key per attempt: the same key would replay the previous
+            // (possibly failed) STK prompt instead of reaching Daraja again.
+            val attempt = backendApi.stkPush(
+                saleId = sale.id,
+                phoneNumber = phone.trim(),
+                idempotencyKey = "stk-${sale.id}-${UuidV7.new()}",
+            )
+            _state.update { it.copy(paymentStatus = "Check the customer's phone for the M-PESA PIN prompt.") }
+
+            var status = attempt.status
+            var receipt: String? = null
+            var failureReason: String? = null
+            var waitedMs = 0L
+            while (status == "PENDING" && waitedMs < POLL_TIMEOUT_MS) {
+                val interval = attempt.pollAfterMs ?: DEFAULT_POLL_MS
+                delay(interval)
+                waitedMs += interval
+                val polled = backendApi.paymentStatus(attempt.paymentTransactionId)
+                status = polled.status
+                receipt = polled.mpesaReceiptNumber
+                failureReason = polled.resultDesc
+            }
+
+            when (status) {
+                "SUCCESS" -> {
+                    transactionRepository.applyPaymentOutcome(sale.id, PaymentStatus.PAID, receipt)
+                    _state.update { it.copy(
+                        isProcessing = false,
+                        paymentStatus = "Payment successful",
+                        isPaymentComplete = true,
+                        completedSale = sale.copy(paymentStatus = PaymentStatus.PAID, mpesaRef = receipt, synced = true),
+                        showReceipt = true,
+                        pendingSplitSale = null,
+                        pendingSplitPhone = null,
+                    ) }
+                }
+                "FAILED" -> {
+                    // Do not mark the sale FAILED: keep it PENDING so the M-PESA
+                    // leg can be retried and the cash already taken stays on record.
+                    _state.update { it.copy(
+                        isProcessing = false,
+                        paymentStatus = null,
+                        pendingSplitSale = sale,
+                        pendingSplitPhone = phone,
+                        paymentError = "M-PESA leg failed: ${failureReason ?: "customer did not authorise"}. " +
+                            "Cash ${CurrencyFormatter.format(sale.cashAmount)} is recorded — retry the M-PESA leg or settle it in History.",
+                    ) }
+                }
+                else -> _state.update { it.copy(
+                    isProcessing = false,
+                    paymentStatus = "M-PESA not confirmed yet. The sale stays pending — retry or check History later.",
+                    pendingSplitSale = sale,
+                    pendingSplitPhone = phone,
+                ) }
+            }
+        } catch (e: ApiException) {
+            val detail = if (e.code == "STK_IN_PROGRESS") {
+                "An M-PESA prompt is already in flight for this sale — wait for the customer to respond."
+            } else {
+                "${e.message}${if (e.code.isBlank()) "" else " (${e.code})"}."
+            }
+            _state.update { it.copy(
+                isProcessing = false,
+                paymentStatus = null,
+                pendingSplitSale = sale,
+                pendingSplitPhone = phone,
+                paymentError = "$detail Cash ${CurrencyFormatter.format(sale.cashAmount)} is recorded; the sale stays pending.",
+            ) }
+        } catch (e: Exception) {
+            _state.update { it.copy(
+                isProcessing = false,
+                paymentStatus = null,
+                pendingSplitSale = sale,
+                pendingSplitPhone = phone,
+                paymentError = "Network error: ${e.message ?: "could not reach the backend"}. " +
+                    "Cash ${CurrencyFormatter.format(sale.cashAmount)} is recorded; retry the M-PESA leg when back online.",
+            ) }
+        }
+    }
+
+    private fun splitShapeError(cashCents: Long, totalCents: Long): String? {
+        if (cashCents <= 0L) return "Enter the cash the customer is paying (more than zero)"
+        if (cashCents >= totalCents) return "Cash covers the whole sale — use the Cash method instead"
+        val remainder = totalCents - cashCents
+        if (remainder < 100L) return "The M-PESA remainder must be at least KES 1"
+        if (remainder % 100L != 0L) return "The M-PESA remainder must be a whole number of shillings — adjust the cash"
+        return null
     }
 
     fun hideReceipt() {

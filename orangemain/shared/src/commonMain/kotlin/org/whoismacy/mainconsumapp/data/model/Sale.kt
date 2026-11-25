@@ -12,6 +12,7 @@ data class Sale(
     val paymentMethod: PaymentMethod,
     val amountReceived: Double,
     val changeAmount: Double,
+    val cashAmount: Double = 0.0,
     val mpesaRef: String? = null,
     val cashierName: String? = null,
     val createdAt: String = "",

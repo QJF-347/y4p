@@ -161,8 +161,13 @@ Rules:
   for explicit admin restock; negative stock is accepted and flagged.
 - **Price drift**: if `sale_item.unit_price_cents` differs from the current product price, the sale is
   accepted and the result carries `"warning": "PRICE_DRIFT"`.
-- MPESA sales arrive with `payment_status=PENDING`; server ignores client-sent `PAID`/`mpesa_receipt` for
-  MPESA (canonical values returned). CASH/CARD sales may arrive `PAID`.
+- MPESA and SPLIT sales arrive with `payment_status=PENDING`; the server ignores client-sent `PAID`/`mpesa_receipt`
+  for both (canonical values returned). CASH/CARD sales may arrive `PAID`.
+- `cash_amount_cents` is required on sale rows (default `0`) and immutable once stored: a replay whose value
+  differs → `SALE_IMMUTABLE`. A new `SPLIT` sale is rejected with `SPLIT_AMOUNT_INVALID` unless
+  `0 < cash_amount_cents < total_amount_cents`, the M-Pesa remainder is `>= 100` cents and a whole number of
+  KES (`remainder % 100 == 0`), `amount_received_cents == cash_amount_cents`, and `change_amount_cents == 0`.
+  Non-SPLIT rows must carry `cash_amount_cents == 0`.
 - Response includes the server's canonical `payment_status` for every accepted sale, so a device that was
   offline learns the current state on reconnect.
 
@@ -212,11 +217,18 @@ Backoff 2 s → 4 s → 8 s … max 5 min with jitter; after 24 h unattempted/fa
 
 Preconditions (all server-enforced):
 
-1. Sale exists, belongs to the token's branch, `payment_method = MPESA`, `payment_status = PENDING`.
-2. `amount_cents == sale.total_amount_cents`, else 422 `AMOUNT_MISMATCH`.
+1. Sale exists, belongs to the token's branch, `payment_method IN (MPESA, SPLIT)`, `payment_status = PENDING`;
+   otherwise 409 `NOT_MPESA_SALE`.
+2. `expected = (method == SPLIT) ? total_amount_cents - cash_amount_cents : total_amount_cents`;
+   `amount_cents == expected`, else 422 `AMOUNT_MISMATCH` (the response carries `expected_cents`).
+   `amount_cents < 100` → 422 `AMOUNT_TOO_SMALL`; `amount_cents % 100 != 0` → 422 `AMOUNT_NOT_WHOLE_KES`
+   (Daraja takes integer shillings, so a split remainder with cents must be rejected at checkout).
 3. No other **PENDING** payment transaction for this sale → else 409 `STK_IN_PROGRESS` (retry allowed with
    `retry: true` only after the previous attempt is terminal or >5 min old).
-4. Rate limit: 1 request / 3 s / sale; 10 / min / device → 429.
+4. `idempotency-key` header dedupes retries; reusing a key with a changed body → 422. The till sends a fresh
+   per-attempt key (`stk-<sale_id>-<uuid>`) so an explicit retry starts a new STK instead of replaying the
+   cached response.
+5. Rate limit: 1 request / 3 s / sale; 10 / min / device → 429.
 
 Server:
 

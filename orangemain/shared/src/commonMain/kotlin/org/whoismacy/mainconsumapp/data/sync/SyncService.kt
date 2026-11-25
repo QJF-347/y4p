@@ -251,6 +251,7 @@ class SyncService(
             totalAmountCents = total_amount.toCents(),
             amountReceivedCents = amount_received.toCents(),
             changeAmountCents = change_amount.toCents(),
+            cashAmountCents = cash_amount.toCents(),
             paymentStatus = payment_status,
             mpesaReceipt = mpesa_ref,
             createdAt = createdAt,

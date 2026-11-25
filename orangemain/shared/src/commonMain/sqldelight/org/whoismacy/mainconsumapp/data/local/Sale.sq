@@ -12,7 +12,8 @@ CREATE TABLE SaleEntity (
     created_at TEXT NOT NULL,
     synced INTEGER NOT NULL DEFAULT 0,
     payment_status TEXT NOT NULL DEFAULT 'PAID',
-    server_version INTEGER
+    server_version INTEGER,
+    cash_amount REAL NOT NULL DEFAULT 0
 );
 
 selectAll:
@@ -28,8 +29,8 @@ selectByDateRange:
 SELECT * FROM SaleEntity WHERE created_at >= ? AND created_at <= ? ORDER BY created_at DESC;
 
 insert:
-INSERT INTO SaleEntity(id, receipt_number, subtotal, tax_amount, total_amount, payment_method, amount_received, change_amount, mpesa_ref, cashier_name, created_at, synced, payment_status)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO SaleEntity(id, receipt_number, subtotal, tax_amount, total_amount, payment_method, amount_received, change_amount, cash_amount, mpesa_ref, cashier_name, created_at, synced, payment_status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getLastReceiptNumber:
 SELECT receipt_number FROM SaleEntity ORDER BY created_at DESC LIMIT 1;

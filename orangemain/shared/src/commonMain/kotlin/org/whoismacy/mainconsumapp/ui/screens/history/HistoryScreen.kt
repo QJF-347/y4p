@@ -20,6 +20,8 @@ import orangemain.shared.generated.resources.close
 import org.jetbrains.compose.resources.painterResource
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.annotation.KoinExperimentalAPI
+import org.whoismacy.mainconsumapp.data.model.PaymentMethod
+import org.whoismacy.mainconsumapp.data.model.PaymentStatus
 import org.whoismacy.mainconsumapp.data.model.Sale
 import org.whoismacy.mainconsumapp.ui.components.ReceiptView
 import org.whoismacy.mainconsumapp.util.CurrencyFormatter
@@ -133,7 +135,19 @@ fun SaleItemRow(
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "Payment Method: ${sale.paymentMethod.name}", style = MaterialTheme.typography.bodySmall)
+            val methodLabel = if (sale.paymentMethod == PaymentMethod.SPLIT) {
+                "Cash ${CurrencyFormatter.format(sale.cashAmount)} + M-PESA ${CurrencyFormatter.format(sale.totalAmount - sale.cashAmount)}"
+            } else {
+                sale.paymentMethod.name
+            }
+            Text(text = "Payment Method: $methodLabel", style = MaterialTheme.typography.bodySmall)
+            if (sale.paymentMethod == PaymentMethod.SPLIT && sale.paymentStatus != PaymentStatus.PAID) {
+                Text(
+                    text = "M-PESA leg: ${sale.paymentStatus.name}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             Text(text = "Date: ${sale.createdAt}", style = MaterialTheme.typography.bodySmall)
         }
     }

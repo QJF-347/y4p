@@ -63,6 +63,20 @@ async function setSalePayment(
 }
 
 /**
+ * Fail a sale whose M-Pesa leg failed. SPLIT sales stay PENDING so the cash
+ * already taken remains on record and the M-Pesa leg can be retried
+ * (API_CONTRACT §4.4).
+ */
+async function failSalePayment(q: Queryable, saleId: string): Promise<void> {
+  await q.query(
+    `UPDATE sale SET payment_status = 'FAILED', payment_updated_at = now(),
+            server_version = nextval('server_version_seq')
+      WHERE id = $1 AND payment_status = 'PENDING' AND payment_method <> 'SPLIT'`,
+    [saleId],
+  );
+}
+
+/**
  * Fail PENDING STK attempts older than the configured timeout, then fail any
  * sale still waiting on them. Returns the number of transactions expired.
  */
@@ -76,7 +90,7 @@ export async function expirePendingStk(deps: Deps): Promise<number> {
       [deps.config.STK_TIMEOUT_MINUTES],
     );
     for (const row of rows) {
-      await setSalePayment(q, row.sale_id, "FAILED", null);
+      await failSalePayment(q, row.sale_id);
       await writeAudit(q, {
         actorType: "SYSTEM",
         actorId: "stk-timeout",
@@ -104,9 +118,11 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
       payment_method: string;
       payment_status: string;
       total_amount_cents: string;
+      cash_amount_cents: string;
       receipt_number: string;
     }>(
-      `SELECT id, branch_id, payment_method, payment_status, total_amount_cents, receipt_number
+      `SELECT id, branch_id, payment_method, payment_status, total_amount_cents,
+              cash_amount_cents, receipt_number
          FROM sale WHERE id = $1`,
       [body.sale_id],
     );
@@ -115,19 +131,27 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
     if (sale.branch_id !== device.branchId) {
       throw forbidden("BRANCH_SCOPE_MISMATCH", "This sale belongs to a different branch");
     }
-    if (sale.payment_method !== "MPESA") {
-      throw unprocessable("NOT_MPESA_SALE", "STK push only applies to MPESA sales");
+    if (sale.payment_method !== "MPESA" && sale.payment_method !== "SPLIT") {
+      throw unprocessable("NOT_MPESA_SALE", "STK push only applies to MPESA and SPLIT sales");
     }
     if (sale.payment_status !== "PENDING") {
       throw conflict("SALE_ALREADY_FINAL", `This sale is already ${sale.payment_status}`);
     }
-    if (body.amount_cents !== undefined && body.amount_cents !== Number(sale.total_amount_cents)) {
-      throw unprocessable("AMOUNT_MISMATCH", "amount_cents does not match the sale total", {
-        expected_cents: Number(sale.total_amount_cents),
+    // SPLIT charges only the remainder; full M-Pesa charges the whole sale.
+    const expectedCents =
+      sale.payment_method === "SPLIT"
+        ? Number(sale.total_amount_cents) - Number(sale.cash_amount_cents)
+        : Number(sale.total_amount_cents);
+    if (body.amount_cents !== undefined && body.amount_cents !== expectedCents) {
+      throw unprocessable("AMOUNT_MISMATCH", "amount_cents does not match the M-Pesa leg", {
+        expected_cents: expectedCents,
       });
     }
-    if (Number(sale.total_amount_cents) < 100) {
+    if (expectedCents < 100) {
       throw unprocessable("AMOUNT_TOO_SMALL", "M-Pesa requires at least 1 whole shilling");
+    }
+    if (expectedCents % 100 !== 0) {
+      throw unprocessable("AMOUNT_NOT_WHOLE_KES", "M-Pesa only accepts whole shillings");
     }
 
     // A still-live attempt blocks a second one (partial unique index backs this
@@ -168,7 +192,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
       });
     }
 
-    const amountKes = Math.round(Number(sale.total_amount_cents) / 100);
+    const amountKes = expectedCents / 100;
     const result = await deps.daraja.stkPush({
       phone,
       amountKes,
@@ -182,7 +206,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
         `INSERT INTO payment_transaction (id, sale_id, checkout_request_id, merchant_request_id,
                                          amount_cents, phone_number, status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $7)`,
-        [id, sale.id, result.checkoutRequestId, result.merchantRequestId, sale.total_amount_cents, phone, clock],
+        [id, sale.id, result.checkoutRequestId, result.merchantRequestId, expectedCents, phone, clock],
       );
     } catch (err) {
       if ((err as { constraint?: string }).constraint === "pt_one_pending_per_sale") {
@@ -198,7 +222,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
       action: "payments.stk_push",
       entity: "payment_transaction",
       entityId: id,
-      details: { sale_id: sale.id, checkout_request_id: result.checkoutRequestId, amount_cents: Number(sale.total_amount_cents) },
+      details: { sale_id: sale.id, checkout_request_id: result.checkoutRequestId, amount_cents: expectedCents },
       ip: req.ip,
     });
 
@@ -207,7 +231,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
       checkout_request_id: result.checkoutRequestId,
       merchant_request_id: result.merchantRequestId,
       status: "PENDING",
-      amount_cents: Number(sale.total_amount_cents),
+      amount_cents: expectedCents,
       phone_number: phone,
       customer_message: result.customerMessage,
       expires_at: new Date(clock.getTime() + config.STK_TIMEOUT_MINUTES * 60_000).toISOString(),
@@ -285,7 +309,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
                     raw_payload_ref = $4, updated_at = now() WHERE id = $1`,
             [pt.id, cb.ResultCode, cb.ResultDesc ?? null, payloadRef],
           );
-          await setSalePayment(q, pt.sale_id, "FAILED", null);
+          await failSalePayment(q, pt.sale_id);
           return;
         }
 
@@ -323,7 +347,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps, guards: 
                 WHERE id = $1`,
               [pt.id, payloadRef],
             );
-            await setSalePayment(q, pt.sale_id, "FAILED", null);
+            await failSalePayment(q, pt.sale_id);
             await q.query(
               `INSERT INTO reconciliation_queue
                  (id, payment_transaction_id, checkout_request_id, mpesa_receipt_number, raw_payload_ref)

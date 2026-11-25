@@ -66,17 +66,27 @@ class TransactionRepository(
         cartItems: List<CartItem>,
         paymentMethod: PaymentMethod,
         amountReceived: Double,
+        cashApplied: Double = 0.0,
         mpesaRef: String? = null,
         cashierName: String? = null,
         taxRate: Double = 0.16,
         paymentStatus: PaymentStatus = PaymentStatus.PAID,
+        deviceTag: String? = null,
     ): Sale {
         val now = clock.now().toLocalDateTime(TimeZone.currentSystemDefault())
         val subtotal = cartItems.sumOf { it.totalPrice }
         val taxAmount = subtotal * taxRate
         val totalAmount = subtotal + taxAmount
-        val changeAmount = if (paymentMethod == PaymentMethod.CASH) amountReceived - totalAmount else 0.0
-        val receiptNumber = generateReceiptNumber(now.date)
+        // SPLIT records the cash leg it collected and never carries change; any
+        // remainder is settled by the M-Pesa leg server-side.
+        val cashAmount = if (paymentMethod == PaymentMethod.SPLIT) cashApplied else 0.0
+        val changeAmount = when (paymentMethod) {
+            PaymentMethod.CASH -> amountReceived - totalAmount
+            PaymentMethod.SPLIT -> 0.0
+            else -> 0.0
+        }
+        val recordedReceived = if (paymentMethod == PaymentMethod.SPLIT) cashApplied else amountReceived
+        val receiptNumber = generateReceiptNumber(now.date, deviceTag)
 
         val sale = Sale(
             id = saleId,
@@ -85,8 +95,9 @@ class TransactionRepository(
             taxAmount = taxAmount,
             totalAmount = totalAmount,
             paymentMethod = paymentMethod,
-            amountReceived = amountReceived,
+            amountReceived = recordedReceived,
             changeAmount = changeAmount,
+            cashAmount = cashAmount,
             mpesaRef = mpesaRef,
             cashierName = cashierName,
             createdAt = now.toString(),
@@ -103,6 +114,7 @@ class TransactionRepository(
                 payment_method = sale.paymentMethod.name,
                 amount_received = sale.amountReceived,
                 change_amount = sale.changeAmount,
+                cash_amount = sale.cashAmount,
                 mpesa_ref = sale.mpesaRef,
                 cashier_name = sale.cashierName,
                 created_at = sale.createdAt,
@@ -146,16 +158,24 @@ class TransactionRepository(
     fun isSaleSynced(saleId: String): Boolean =
         saleQueries.selectById(saleId).executeAsOneOrNull()?.synced == 1L
 
-    private fun generateReceiptNumber(date: LocalDate): String {
+    private fun generateReceiptNumber(date: LocalDate, deviceTag: String?): String {
         val dateStr = "${date.year}${date.month.number.toString().padStart(2, '0')}${date.day.toString().padStart(2, '0')}"
+        // A short per-device tag keeps two tills in the same branch from minting the
+        // same receipt; the backend enforces UNIQUE(branch_id, receipt_number).
+        val tag = deviceTag
+            ?.filter { it.isLetterOrDigit() }
+            ?.take(4)
+            ?.uppercase()
+            ?.ifBlank { null }
+            ?: "LOCL"
         val lastReceipt = saleQueries.getLastReceiptNumber().executeAsOneOrNull()
-        val sequence = if (lastReceipt != null && lastReceipt.contains(dateStr)) {
+        val sequence = if (lastReceipt != null && lastReceipt.contains("-$dateStr-")) {
             val lastSeq = lastReceipt.substringAfterLast("-").toIntOrNull() ?: 0
             lastSeq + 1
         } else {
             1
         }
-        return "ORG-$dateStr-${sequence.toString().padStart(3, '0')}"
+        return "ORG-$dateStr-$tag-${sequence.toString().padStart(3, '0')}"
     }
 }
 
@@ -169,6 +189,7 @@ private fun org.whoismacy.mainconsumapp.data.local.SaleEntity.toSale(): Sale {
         paymentMethod = PaymentMethod.valueOf(payment_method),
         amountReceived = amount_received,
         changeAmount = change_amount,
+        cashAmount = cash_amount,
         mpesaRef = mpesa_ref,
         cashierName = cashier_name,
         createdAt = created_at,

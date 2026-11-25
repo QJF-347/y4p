@@ -237,6 +237,125 @@ describe("sync", () => {
     assert.equal(rows[0]!.mpesa_receipt, null);
   });
 
+  it("keeps a SPLIT sale PENDING and stores the cash leg", async () => {
+    const { app, branchId, device } = await setup();
+    const product = productPayload(branchId);
+    const sale = salePayload(
+      branchId,
+      device.deviceId,
+      { id: product.id },
+      {
+        payment_method: "SPLIT",
+        payment_status: "PAID",
+        mpesa_receipt: "QK-FORGED",
+        cash_amount_cents: 40_000,
+        amount_received_cents: 40_000,
+        change_amount_cents: 0,
+      },
+    );
+    const push = await pushBatch(app, device.deviceToken, {
+      device_id: device.deviceId,
+      branch_id: branchId,
+      products: [product],
+      sales: [sale],
+    });
+    const row = findResult(push.json() as { results: Result[] }, "sale", sale.id);
+    assert.equal(row.status, "SYNCED");
+    assert.equal(row.payment_status, "PENDING");
+
+    const { rows } = await pool.query<{
+      payment_method: string;
+      payment_status: string;
+      mpesa_receipt: string | null;
+      cash_amount_cents: string;
+    }>(
+      `SELECT payment_method, payment_status, mpesa_receipt, cash_amount_cents FROM sale WHERE id = $1`,
+      [sale.id],
+    );
+    assert.equal(rows[0]!.payment_method, "SPLIT");
+    assert.equal(rows[0]!.payment_status, "PENDING");
+    assert.equal(rows[0]!.mpesa_receipt, null);
+    assert.equal(Number(rows[0]!.cash_amount_cents), 40_000);
+  });
+
+  it("rejects SPLIT sales whose legs do not add up", async () => {
+    const { app, branchId, device } = await setup();
+    const product = productPayload(branchId);
+    const base = salePayload(branchId, device.deviceId, { id: product.id }, {
+      payment_method: "SPLIT",
+      amount_received_cents: 40_000,
+      change_amount_cents: 0,
+      cash_amount_cents: 40_000,
+    });
+    const total = base.total_amount_cents;
+    const cases: { name: string; over: Record<string, unknown> }[] = [
+      { name: "cash leg is zero", over: { cash_amount_cents: 0 } },
+      { name: "cash leg covers the whole sale", over: { cash_amount_cents: total } },
+      { name: "remainder below one shilling", over: { cash_amount_cents: total - 99 } },
+      { name: "remainder not whole shillings", over: { cash_amount_cents: total - 150 } },
+      { name: "amount received differs from cash", over: { amount_received_cents: 30_000 } },
+      { name: "change is not zero", over: { change_amount_cents: 500 } },
+    ];
+    for (const { name, over } of cases) {
+      const sale = { ...base, id: base.id, receipt_number: `${base.receipt_number}-${name.length}`, ...over };
+      const push = await pushBatch(app, device.deviceToken, {
+        device_id: device.deviceId,
+        branch_id: branchId,
+        sales: [sale],
+      });
+      const row = findResult(push.json() as { results: Result[] }, "sale", sale.id);
+      assert.equal(row.status, "REJECTED", name);
+      assert.equal(row.code, "SPLIT_AMOUNT_INVALID", name);
+    }
+
+    const { rows } = await pool.query(`SELECT 1 FROM sale WHERE branch_id = $1`, [branchId]);
+    assert.equal(rows.length, 0, "no invalid SPLIT sale was persisted");
+  });
+
+  it("rejects a non-SPLIT sale that carries cash", async () => {
+    const { app, branchId, device } = await setup();
+    const product = productPayload(branchId);
+    await pushBatch(app, device.deviceToken, {
+      device_id: device.deviceId,
+      branch_id: branchId,
+      products: [product],
+    });
+    const sale = salePayload(branchId, device.deviceId, { id: product.id }, { cash_amount_cents: 5_000 });
+    const push = await pushBatch(app, device.deviceToken, {
+      device_id: device.deviceId,
+      branch_id: branchId,
+      sales: [sale],
+    });
+    const row = findResult(push.json() as { results: Result[] }, "sale", sale.id);
+    assert.equal(row.status, "REJECTED");
+    assert.equal(row.code, "SPLIT_AMOUNT_INVALID");
+  });
+
+  it("flags a SPLIT replay that changed the cash leg", async () => {
+    const { app, branchId, device } = await setup();
+    const product = productPayload(branchId);
+    const sale = salePayload(branchId, device.deviceId, { id: product.id }, {
+      payment_method: "SPLIT",
+      amount_received_cents: 40_000,
+      change_amount_cents: 0,
+      cash_amount_cents: 40_000,
+    });
+    const payload = { device_id: device.deviceId, branch_id: branchId, products: [product], sales: [sale] };
+    const first = await pushBatch(app, device.deviceToken, payload);
+    assert.equal(findResult(first.json() as { results: Result[] }, "sale", sale.id).status, "SYNCED");
+
+    const edited = { ...sale, cash_amount_cents: 50_000, amount_received_cents: 50_000 };
+    const replay = await pushBatch(app, device.deviceToken, {
+      device_id: device.deviceId,
+      branch_id: branchId,
+      sales: [edited],
+    });
+    const row = findResult(replay.json() as { results: Result[] }, "sale", sale.id);
+    assert.equal(row.status, "CONFLICT");
+    assert.equal(row.code, "SALE_IMMUTABLE");
+    assert.match(row.message ?? "", /cash_amount_cents/);
+  });
+
   it("flags a sale that changed an immutable field", async () => {
     const { app, branchId, device } = await setup();
     const product = productPayload(branchId);

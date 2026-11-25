@@ -42,6 +42,7 @@ import org.whoismacy.mainconsumapp.data.model.SaleItem
 import org.whoismacy.mainconsumapp.ui.components.NumPad
 import org.whoismacy.mainconsumapp.ui.components.ReceiptView
 import org.whoismacy.mainconsumapp.util.CurrencyFormatter
+import kotlin.math.roundToLong
 
 @Composable
 fun CheckoutScreen(
@@ -58,6 +59,13 @@ fun CheckoutScreen(
 
     val canCompleteCash = hasAmount && amountReceived >= totalAmount
     val canSendStk = state.phoneNumberText.filter { it.isDigit() }.length >= 9
+    // Split tender: the cashier enters either the cash or the M-PESA side; the
+    // other side is derived from the total.
+    val splitCash = state.splitCashText.toDoubleOrNull() ?: 0.0
+    val splitMpesa = (totalAmount - splitCash).coerceAtLeast(0.0)
+    val splitMpesaCents = (splitMpesa * 100).toLong()
+    val canSplit = splitCash > 0.0 && splitCash < totalAmount &&
+        splitMpesaCents >= 100 && splitMpesaCents % 100 == 0L && canSendStk
     
     val mockCartItems = listOf(
         CartItem(
@@ -207,6 +215,23 @@ fun CheckoutScreen(
                             Text("📱 M-PESA")
                         }
                     }
+
+                    val isSplit = state.selectedPaymentMethod == PaymentMethod.SPLIT
+                    if (isSplit) {
+                        Button(
+                            onClick = { viewModel.setPaymentMethod(PaymentMethod.SPLIT) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("💵+📱 SPLIT")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { viewModel.setPaymentMethod(PaymentMethod.SPLIT) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("💵+📱 SPLIT")
+                        }
+                    }
                 }
                 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -265,7 +290,7 @@ fun CheckoutScreen(
                             )
                         }
                     }
-                } else {
+                } else if (state.selectedPaymentMethod == PaymentMethod.MPESA) {
                     // M-PESA Integration
                     Text("Enter Customer Phone Number for STK Push:", style = MaterialTheme.typography.bodyLarge)
                     
@@ -309,26 +334,147 @@ fun CheckoutScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(text = it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                     }
+                } else {
+                    // Split tender: cash now, M-PESA for the remainder.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        if (state.splitInputIsCash) {
+                            Button(onClick = { viewModel.toggleSplitInputSide() }, modifier = Modifier.weight(1f)) {
+                                Text("💵 Enter cash")
+                            }
+                            OutlinedButton(onClick = { viewModel.toggleSplitInputSide() }, modifier = Modifier.weight(1f)) {
+                                Text("📱 Enter M-PESA amount")
+                            }
+                        } else {
+                            OutlinedButton(onClick = { viewModel.toggleSplitInputSide() }, modifier = Modifier.weight(1f)) {
+                                Text("💵 Enter cash")
+                            }
+                            Button(onClick = { viewModel.toggleSplitInputSide() }, modifier = Modifier.weight(1f)) {
+                                Text("📱 Enter M-PESA amount")
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                            Text(
+                                text = if (state.splitInputIsCash) "Cash" else "M-PESA",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Text(
+                                text = if (state.splitCashText.isEmpty()) "KES 0.00"
+                                else CurrencyFormatter.format(if (state.splitInputIsCash) splitCash else splitMpesa),
+                                style = MaterialTheme.typography.headlineMedium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (state.splitInputIsCash)
+                                    "M-PESA for the remainder: ${CurrencyFormatter.format(splitMpesa)}"
+                                else
+                                    "Cash for the remainder: ${CurrencyFormatter.format(splitCash)}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (state.isProcessing) {
+                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                    } else {
+                        NumPad(
+                            onNumberClick = { char ->
+                                if (char == "." && state.splitCashText.contains(".")) return@NumPad
+                                // Typing on the M-PESA side also updates the cash leg it implies.
+                                val base = state.splitCashText
+                                val next = base + char
+                                val typed = next.toDoubleOrNull() ?: 0.0
+                                val newCash = if (state.splitInputIsCash) typed else (totalAmount - typed).coerceAtLeast(0.0)
+                                viewModel.onSplitCashChanged(if (newCash <= 0.0 && !state.splitInputIsCash) "" else formatSplitAmount(newCash))
+                            },
+                            onClearClick = { viewModel.onSplitCashChanged("") },
+                            onBackspaceClick = {
+                                if (state.splitCashText.isNotEmpty()) {
+                                    viewModel.onSplitCashChanged(state.splitCashText.dropLast(1))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Customer's M-PESA number:", style = MaterialTheme.typography.bodyLarge)
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Text(
+                            text = state.phoneNumberText.ifEmpty { "07..." },
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                    if (!state.isProcessing) {
+                        NumPad(
+                            onNumberClick = { char ->
+                                if (char != ".") viewModel.onPhoneNumberChanged(state.phoneNumberText + char)
+                            },
+                            onClearClick = { viewModel.onPhoneNumberChanged("") },
+                            onBackspaceClick = {
+                                if (state.phoneNumberText.isNotEmpty()) {
+                                    viewModel.onPhoneNumberChanged(state.phoneNumberText.dropLast(1))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        )
+                    }
+
+                    state.paymentStatus?.let {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(text = it, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                    }
+                    state.paymentError?.let {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(text = it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                    }
                 }
-                
+
                 Spacer(modifier = Modifier.height(32.dp))
                 
                 Button(
-                    onClick = { 
-                        if (state.selectedPaymentMethod == PaymentMethod.CASH) {
-                            viewModel.completeCashSale(totalAmount)
-                        } else {
-                            viewModel.sendStkPush(totalAmount)
+                    onClick = {
+                        when (state.selectedPaymentMethod) {
+                            PaymentMethod.CASH -> viewModel.completeCashSale(totalAmount)
+                            PaymentMethod.MPESA -> viewModel.sendStkPush(totalAmount)
+                            PaymentMethod.SPLIT ->
+                                if (state.pendingSplitSale != null) viewModel.retrySplitStk()
+                                else viewModel.sendSplitSale(totalAmount)
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = !state.isProcessing && if (state.selectedPaymentMethod == PaymentMethod.CASH) canCompleteCash else canSendStk
+                    enabled = !state.isProcessing && when (state.selectedPaymentMethod) {
+                        PaymentMethod.CASH -> canCompleteCash
+                        PaymentMethod.MPESA -> canSendStk
+                        PaymentMethod.SPLIT -> canSplit || state.pendingSplitSale != null
+                    }
                 ) {
                     Text(
-                        text = when {
-                            state.selectedPaymentMethod == PaymentMethod.MPESA -> "SEND STK PUSH"
-                            !canCompleteCash -> "SHORT BY ${CurrencyFormatter.format(shortfall)}"
-                            else -> "COMPLETE SALE"
+                        text = when (state.selectedPaymentMethod) {
+                            PaymentMethod.MPESA -> "SEND STK PUSH"
+                            PaymentMethod.SPLIT ->
+                                if (state.pendingSplitSale != null) "RETRY M-PESA LEG"
+                                else "CASH ${CurrencyFormatter.format(splitCash)} + M-PESA ${CurrencyFormatter.format(splitMpesa)}"
+                            PaymentMethod.CASH ->
+                                if (!canCompleteCash) "SHORT BY ${CurrencyFormatter.format(shortfall)}"
+                                else "COMPLETE SALE"
                         },
                         style = MaterialTheme.typography.titleMedium
                     )
@@ -336,4 +482,12 @@ fun CheckoutScreen(
             }
         }
     }
+}
+/** Renders a split amount as a plain decimal string the cash keypad can edit. */
+private fun formatSplitAmount(amount: Double): String {
+    val cents = (amount * 100).roundToLong()
+    if (cents <= 0L) return ""
+    val whole = cents / 100
+    val frac = cents % 100
+    return if (frac == 0L) whole.toString() else "$whole.${frac.toString().padStart(2, '0')}"
 }

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pdf2xml SYSTEM "pdf2xml.dtd">
+
+<pdf2xml producer="poppler" version="25.03.0">
+<page number="4" position="absolute" top="0" left="0" height="2376" width="1836">
+	<fontspec id="0" size="33" family="AAAAAA+ArialMT" color="#000000"/>
+	<fontspec id="1" size="48" family="BAAAAA+Montserrat-SemiBold" color="#000000"/>
+	<fontspec id="2" size="42" family="FAAAAA+Montserrat" color="#000000"/>
+	<fontspec id="3" size="33" family="EAAAAA+Montserrat" color="#000000"/>
+<text top="18" left="216" width="9" height="37" font="0"> </text>
+<text top="216" left="592" width="665" height="59" font="1"><b>Chapter One: Introduction </b></text>
+<text top="337" left="216" width="338" height="51" font="2"><b>1.1 Background </b></text>
+<text top="450" left="216" width="1395" height="40" font="3">To fully grasp the necessity of this project, it is vital to examine the massive scale and </text>
+<text top="508" left="216" width="1371" height="40" font="3">the current operational state of the Kenyan retail and small business sector. Ofﬁcial </text>
+<text top="567" left="216" width="1363" height="40" font="3">data indicates that there are over 7.4 million Micro, Small, and Medium Enterprises </text>
+<text top="625" left="216" width="1360" height="40" font="3">operating in Kenya today. These businesses collectively employ approximately 14.9 </text>
+<text top="684" left="216" width="1344" height="40" font="3">million people, which represents a massive portion of the national workforce. The </text>
+<text top="742" left="216" width="1362" height="40" font="3">sector is so signiﬁcant that it contributes approximately 40 percent to the national </text>
+<text top="801" left="216" width="1349" height="40" font="3">Gross Domestic Product. In recent years, these small businesses accounted for an </text>
+<text top="859" left="216" width="1001" height="40" font="3">astonishing 85 percent of all new jobs created in the country.</text>
+<text top="861" left="1217" width="9" height="37" font="0"> </text>
+<text top="918" left="216" width="1270" height="40" font="3">Despite this massive economic scale, the sector operates in a highly informal </text>
+<text top="976" left="216" width="1408" height="40" font="3">manner. Of the 7.4 million businesses, only about 1.6 million are formally licensed and </text>
+<text top="1035" left="216" width="1301" height="40" font="3">registered, leaving a staggering 5.8 million businesses operating entirely in the </text>
+<text top="1093" left="216" width="316" height="40" font="3">informal economy. </text>
+<text top="1152" left="216" width="1368" height="40" font="3">In this vast market, mobile money is the undisputed king of payments. Safaricom's </text>
+<text top="1210" left="216" width="1335" height="40" font="3">M-Pesa network processes hundreds of billions of dollars annually and is used by </text>
+<text top="1269" left="216" width="1407" height="40" font="3">roughly 96 percent of Kenyan adults. It is the default payment method for everything </text>
+<text top="1327" left="216" width="1304" height="40" font="3">from large electronics purchases to tiny daily grocery runs. However, this heavy </text>
+<text top="1386" left="216" width="1319" height="40" font="3">reliance on mobile money creates a massive administrative burden for business </text>
+<text top="1444" left="216" width="1325" height="40" font="3">owners. When a customer pays via M-Pesa, the payment conﬁrmation data lives </text>
+<text top="1503" left="216" width="1372" height="40" font="3">securely within the telecommunications company's network, while the operational </text>
+<text top="1561" left="216" width="1351" height="40" font="3">data what speciﬁc item was sold, who the cashier was, and how much stock is left </text>
+<text top="1620" left="216" width="1402" height="40" font="3">lives in a completely separate cash register, a basic spreadsheet, or a paper notebook.</text>
+<text top="1622" left="1618" width="9" height="37" font="0"> </text>
+<text top="1678" left="216" width="1334" height="40" font="3">In addition to these payment tracking challenges, the regulatory environment in </text>
+<text top="1737" left="216" width="1186" height="40" font="3">Kenya has recently shifted in a way that directly impacts everyday retail. </text>
+<text top="1795" left="216" width="9" height="40" font="3"> </text>
+<text top="1854" left="216" width="9" height="40" font="3"> </text>
+<text top="1912" left="216" width="9" height="40" font="3"> </text>
+<text top="1971" left="216" width="9" height="40" font="3"> </text>
+<text top="2029" left="216" width="9" height="40" font="3"> </text>
+<text top="2088" left="216" width="9" height="40" font="3"> </text>
+</page>
+<outline>
+<item page="1"> </item>
+<item page="1"> </item>
+<item page="1">Project Proposal </item>
+<outline>
+<item page="1">Distributed Real-Time Payment and Inventory System for the Kenyan Retail Sector. </item>
+<item page="2">Declaration </item>
+<item page="3">Abstract </item>
+</outline>
+<item page="4">Chapter One: Introduction </item>
+<outline>
+<item page="4">1.1 Background </item>
+<item page="6">1.3 Objectives </item>
+<outline>
+<item page="6">General Objective </item>
+<item page="6">Specific Objectives </item>
+</outline>
+<item page="7">1.4 Justification </item>
+<outline>
+<item page="7">The Economic Cost of Operational Fragmentation </item>
+</outline>
+<item page="10">1.5 Project Boundaries and Limitations </item>
+<item page="12">1.6 Operational Boundaries </item>
+</outline>
+<item page="13">Chapter Two: Literature Review and Case Studies </item>
+<outline>
+<item page="13">Introduction </item>
+<item page="14">Case Studies </item>
+<outline>
+<item page="14">Case Study 1: Veira &amp; Gigva </item>
+<item page="15">Case Study 2: Daraja API </item>
+<item page="16">Case Study 3: Offline-First Application Architectures </item>
+<item page="17">Case Study 4: Distributed Retail Systems and Local-First Architectures </item>
+<item page="18">Case Study 5: Comparative Analysis of Existing Retail Management Systems </item>
+</outline>
+<item page="20">Summary </item>
+</outline>
+<item page="21">Chapter Three: System Implementation and Technical Design </item>
+<outline>
+<item page="21">Introduction </item>
+<item page="22">Software Design </item>
+<outline>
+<item page="23">Notification and Exception Module </item>
+<item page="24">Security Measures and Data Integrity </item>
+<item page="25">Implementation and Validation: Testing Strategy </item>
+<item page="26">Use Case Diagram </item>
+</outline>
+<item page="27">Preliminary Data Processing &amp; Analysis </item>
+<outline>
+<item page="27">Business Intelligence Reporting </item>
+</outline>
+</outline>
+<item page="29">Appendices </item>
+<outline>
+<item page="29">Safaricom Automated Payment JSON Payload Structure </item>
+<item page="30"> </item>
+</outline>
+<item page="31">References </item>
+</outline>
+</pdf2xml>

@@ -7,6 +7,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -14,6 +16,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -61,10 +64,34 @@ fun App() {
             // every minute while the app is open. No-ops if not provisioned.
             val syncService: SyncService = koinInject()
             val syncScope = rememberCoroutineScope()
+            val snackbarHostState = remember { SnackbarHostState() }
             LaunchedEffect(Unit) {
                 while (true) {
                     syncService.syncCycle()
                     delay(60_000)
+                }
+            }
+
+            // A manual Sync reports what happened — useful when sales don't reach
+            // the admin dashboard, since push rejections are otherwise silent.
+            val runManualSync: () -> Unit = {
+                syncScope.launch {
+                    val message = try {
+                        val push = syncService.pushPending()
+                        val pull = syncService.pull()
+                        runCatching { syncService.heartbeat() }
+                        when {
+                            !push.configured -> "This till is not set up — open Device setup."
+                            push.failures.isNotEmpty() ->
+                                "Pushed ${push.synced}/${push.attempted}, pulled ${pull.products} products. " +
+                                    "First failure: ${push.failures.first()}"
+                            else ->
+                                "Pushed ${push.synced}/${push.attempted}, pulled ${pull.products} products."
+                        }
+                    } catch (e: Exception) {
+                        "Sync failed: ${e.message ?: "network error"}"
+                    }
+                    snackbarHostState.showSnackbar(message)
                 }
             }
 
@@ -74,13 +101,7 @@ fun App() {
                         TopAppBar(
                             title = { Text("Orange POS") },
                             actions = {
-                                TextButton(
-                                    onClick = {
-                                        syncScope.launch {
-                                            syncService.syncCycle()
-                                        }
-                                    }
-                                ) {
+                                TextButton(onClick = runManualSync) {
                                     Text("Sync")
                                 }
                                 TextButton(onClick = { navController.navigate(Route.Setup) { launchSingleTop = true } }) {
@@ -90,6 +111,7 @@ fun App() {
                         )
                     }
                 },
+                snackbarHost = { SnackbarHost(snackbarHostState) },
                 bottomBar = {
                     if (showBottomBar) {
                         NavigationBar {
